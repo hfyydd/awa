@@ -62,6 +62,12 @@ class AwaAccessibilityService : AccessibilityService() {
         instance = this
         Toast.makeText(this, "Awa 助手辅助功能已连接", Toast.LENGTH_SHORT).show()
         registerScreenshotObserver()
+        
+        // Automatically start FloatingOverlayService if overlay permission is granted and floating ball is enabled
+        if (android.provider.Settings.canDrawOverlays(this) &&
+            com.example.awaassistant.data.SettingsManager.isFloatingBallEnabled(this)) {
+            FloatingOverlayService.start(this)
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {

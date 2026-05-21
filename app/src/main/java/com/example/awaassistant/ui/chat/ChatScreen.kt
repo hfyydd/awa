@@ -36,6 +36,7 @@ import com.example.awaassistant.data.CaptureRecord
 fun ChatScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    showTopBar: Boolean = true,
     viewModel: ChatViewModel = viewModel(factory = ChatViewModel.Factory(LocalContext.current))
 ) {
     val context = LocalContext.current
@@ -54,22 +55,24 @@ fun ChatScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("智能知识库对话", fontWeight = FontWeight.Bold, color = Color.White) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "返回", tint = Color.White)
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { viewModel.clearHistory() }) {
-                        Icon(Icons.Default.ClearAll, contentDescription = "清空历史", tint = Color.LightGray)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF0F0C1B))
-            )
+            if (showTopBar) {
+                TopAppBar(
+                    title = { Text("智能知识库对话", fontWeight = FontWeight.Bold, color = Color.White) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = "返回", tint = Color.White)
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { viewModel.clearHistory() }) {
+                            Icon(Icons.Default.ClearAll, contentDescription = "清空历史", tint = Color.LightGray)
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF0F0C1B))
+                )
+            }
         },
-        containerColor = Color(0xFF0F0C1B)
+        containerColor = if (showTopBar) Color(0xFF0F0C1B) else Color.Transparent
     ) { paddingValues ->
         Column(
             modifier = modifier

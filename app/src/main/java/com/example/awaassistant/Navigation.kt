@@ -5,6 +5,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
+import com.example.awaassistant.ui.MainPagerScreen
 import com.example.awaassistant.ui.dashboard.DashboardScreen
 import com.example.awaassistant.ui.chat.ChatScreen
 import com.example.awaassistant.ui.settings.SettingsScreen
@@ -30,8 +31,7 @@ fun MainNavigation(recordIdToShow: Long? = null) {
         onBack = { backStack.removeLastOrNull() },
         entryProvider = entryProvider {
             entry<Main> {
-                DashboardScreen(
-                    onNavigateToChat = { backStack.add(Chat) },
+                MainPagerScreen(
                     onNavigateToSettings = { backStack.add(Settings) },
                     onNavigateToDetail = { id -> backStack.add(NoteDetail(id)) }
                 )
@@ -55,3 +55,4 @@ fun MainNavigation(recordIdToShow: Long? = null) {
         }
     )
 }
+

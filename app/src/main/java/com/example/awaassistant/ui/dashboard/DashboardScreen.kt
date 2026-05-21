@@ -51,6 +51,7 @@ fun DashboardScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToDetail: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    showTopBar: Boolean = true,
     viewModel: DashboardViewModel = viewModel(factory = DashboardViewModel.Factory(LocalContext.current))
 ) {
     val context = LocalContext.current
@@ -95,26 +96,28 @@ fun DashboardScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        "Awa 智能助手",
-                        fontFamily = MaterialTheme.typography.titleLarge.fontFamily,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
+            if (showTopBar) {
+                TopAppBar(
+                    title = {
+                        Text(
+                            "Awa 智能助手",
+                            fontFamily = MaterialTheme.typography.titleLarge.fontFamily,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    },
+                    actions = {
+                        IconButton(onClick = onNavigateToSettings) {
+                            Icon(Icons.Default.Settings, contentDescription = "设置", tint = Color.White)
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color(0xFF0F0C1B) // 深空色顶栏
                     )
-                },
-                actions = {
-                    IconButton(onClick = onNavigateToSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "设置", tint = Color.White)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF0F0C1B) // 深空色顶栏
                 )
-            )
+            }
         },
-        containerColor = Color(0xFF0F0C1B) // 极简深色大底
+        containerColor = if (showTopBar) Color(0xFF0F0C1B) else Color.Transparent // 极简深色大底
     ) { paddingValues ->
         Box(
             modifier = modifier
@@ -138,28 +141,7 @@ fun DashboardScreen(
                     StatusHeader(
                         isAccessibilityActive = isAccessibilityActive,
                         isOverlayRunning = isOverlayRunning,
-                        onToggleOverlay = {
-                            if (isOverlayRunning) {
-                                FloatingOverlayService.stop(context)
-                            } else {
-                                if (Settings.canDrawOverlays(context)) {
-                                    FloatingOverlayService.start(context)
-                                } else {
-                                    // 引导开启悬浮窗权限
-                                    val intent = Intent(
-                                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                        Uri.parse("package:${context.packageName}")
-                                    )
-                                    context.startActivity(intent)
-                                }
-                            }
-                            // 延时刷新状态
-                            isOverlayRunning = !isOverlayRunning
-                        },
-                        onOpenAccessibility = {
-                            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                            context.startActivity(intent)
-                        }
+                        recordsCount = records.size
                     )
                 }
 
@@ -245,100 +227,66 @@ fun DashboardScreen(
 fun StatusHeader(
     isAccessibilityActive: Boolean,
     isOverlayRunning: Boolean,
-    onToggleOverlay: () -> Unit,
-    onOpenAccessibility: () -> Unit
+    recordsCount: Int
 ) {
-    val context = LocalContext.current
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = Color(0x1FAD91FF) // 极简半透明磨砂紫
+            containerColor = Color(0x0AFFFFFF) // Super subtle white glassmorphism
         ),
-        elevation = CardDefaults.cardElevation(0.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x10FFFFFF)),
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 8.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     Text(
-                        "下午好，Awa 助手已连接",
+                        "Awa 智能助手",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        "智能截图与快捷整理已就绪，随时帮您分析",
-                        fontSize = 12.sp,
-                        color = Color.LightGray
-                    )
+                    
+                    // Small status badge
+                    val statusText = if (isAccessibilityActive) "服务就绪" else "服务未开启"
+                    val statusColor = if (isAccessibilityActive) Color(0xFF00E676) else Color(0xFFFF1744)
+                    val statusBg = if (isAccessibilityActive) Color(0x2200E676) else Color(0x22FF1744)
+                    
+                    Badge(
+                        containerColor = statusBg,
+                        contentColor = statusColor
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(statusColor)
+                            )
+                            Text(statusText, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                 }
-
-                // 状态指示器
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .clip(RoundedCornerShape(5.dp))
-                        .background(if (isAccessibilityActive) Color.Green else Color.Red)
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    if (recordsCount > 0) "已为您智能总结并建立 ${recordsCount} 个知识点" else "随时检测屏幕或截图，开启您的智能知识库",
+                    fontSize = 12.sp,
+                    color = Color.LightGray
                 )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-            Divider(color = Color(0x11FFFFFF))
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                // 辅助功能状态按钮
-                Button(
-                    onClick = onOpenAccessibility,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isAccessibilityActive) Color(0x2200E676) else Color(0x22FF1744),
-                        contentColor = if (isAccessibilityActive) Color.Green else Color.Red
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(
-                        if (isAccessibilityActive) "✓ 辅助功能已开启" else "⚠ 请开启辅助功能",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-
-                // 悬浮球开关按钮
-                val isFloatingBallEnabled = remember(isOverlayRunning) {
-                    com.example.awaassistant.data.SettingsManager.isFloatingBallEnabled(context)
-                }
-                Button(
-                    onClick = onToggleOverlay,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isOverlayRunning) Color(0x334A00E0) else Color(0x11FFFFFF),
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(
-                        if (isOverlayRunning) {
-                            if (isFloatingBallEnabled) "关闭截屏悬浮球" else "关闭流光提示服务"
-                        } else {
-                            if (isFloatingBallEnabled) "开启截屏悬浮球" else "开启流光提示服务"
-                        },
-                        fontSize = 12.sp
-                    )
-                }
             }
         }
     }

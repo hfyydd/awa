@@ -62,16 +62,34 @@ fun SettingsScreen(
     // 辅助功能与悬浮球权限状态
     var isAccessibilityActive by remember { mutableStateOf(AwaAccessibilityService.isServiceRunning) }
     var isOverlayGranted by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
+    var isOverlayRunning by remember { mutableStateOf(com.example.awaassistant.service.FloatingOverlayService.isRunning) }
 
     // 各种触发方式的状态
     var isFloatingBallEnabled by remember { mutableStateOf(SettingsManager.isFloatingBallEnabled(context)) }
     var isVolumeShortcutEnabled by remember { mutableStateOf(SettingsManager.isVolumeShortcutEnabled(context)) }
     var isAutoAnalyzeScreenshotsEnabled by remember { mutableStateOf(SettingsManager.isAutoAnalyzeScreenshotsEnabled(context)) }
 
-    // 监听进入页面时重新刷新权限状态
-    LaunchedEffect(Unit) {
-        isAccessibilityActive = AwaAccessibilityService.isServiceRunning
-        isOverlayGranted = Settings.canDrawOverlays(context)
+    // 监听生命周期变化，返回前台时重新刷新权限与服务状态
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                isAccessibilityActive = AwaAccessibilityService.isServiceRunning
+                val nowGranted = Settings.canDrawOverlays(context)
+                isOverlayGranted = nowGranted
+                isOverlayRunning = com.example.awaassistant.service.FloatingOverlayService.isRunning
+                
+                // If they enabled the setting, and just came back after granting overlay permission, start service automatically!
+                if (isFloatingBallEnabled && nowGranted && !com.example.awaassistant.service.FloatingOverlayService.isRunning) {
+                    com.example.awaassistant.service.FloatingOverlayService.start(context)
+                    isOverlayRunning = true
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     val permissionToRequest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -339,12 +357,30 @@ fun SettingsScreen(
                             Text("显示屏幕截屏悬浮球", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
                             Text("在屏幕边缘显示圆形快捷悬浮球", fontSize = 10.sp, color = Color.LightGray)
                         }
+                        val isBallActive = isFloatingBallEnabled && isOverlayGranted && isOverlayRunning
                         Switch(
-                            checked = isFloatingBallEnabled,
+                            checked = isBallActive,
                             onCheckedChange = { enabled ->
-                                isFloatingBallEnabled = enabled
-                                SettingsManager.setFloatingBallEnabled(context, enabled)
-                                com.example.awaassistant.service.FloatingOverlayService.instance?.reloadConfig()
+                                if (enabled) {
+                                    if (Settings.canDrawOverlays(context)) {
+                                        SettingsManager.setFloatingBallEnabled(context, true)
+                                        isFloatingBallEnabled = true
+                                        com.example.awaassistant.service.FloatingOverlayService.start(context)
+                                        isOverlayRunning = true
+                                    } else {
+                                        // 引导授权
+                                        val intent = Intent(
+                                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                            Uri.parse("package:${context.packageName}")
+                                        )
+                                        context.startActivity(intent)
+                                    }
+                                } else {
+                                    SettingsManager.setFloatingBallEnabled(context, false)
+                                    isFloatingBallEnabled = false
+                                    com.example.awaassistant.service.FloatingOverlayService.stop(context)
+                                    isOverlayRunning = false
+                                }
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Color(0xFF8E2DE2),
