@@ -24,6 +24,8 @@ import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.foundation.text.ClickableText
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -393,27 +395,16 @@ fun OnboardingView(
         verticalArrangement = Arrangement.spacedBy(20.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        // Glowing brand logo box
-        Box(
+        // Glowing brand logo image
+        Image(
+            painter = painterResource(id = com.example.awaassistant.R.drawable.ic_launcher_premium),
+            contentDescription = "Awa Logo",
             modifier = Modifier
-                .size(68.dp)
+                .size(80.dp)
                 .graphicsLayer(scaleX = pulseScale, scaleY = pulseScale)
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(Color(0xFF8E2DE2), Color(0xFF4A00E0))
-                    ),
-                    shape = RoundedCornerShape(22.dp)
-                )
-                .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(22.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "Awa",
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Black,
-                color = Color.White
-            )
-        }
+                .clip(RoundedCornerShape(22.dp))
+                .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(22.dp))
+        )
 
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
