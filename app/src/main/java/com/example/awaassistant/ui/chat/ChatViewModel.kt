@@ -86,21 +86,43 @@ class ChatViewModel(context: Context) : ViewModel() {
         val cleanedQuery = query.replace(Regex("[.,?，。？!]"), " ").trim()
         if (cleanedQuery.isEmpty()) return emptyList()
 
-        // 1. 尝试使用 FTS MATCH 全文搜索。将搜索词用空格分割并加上 * 支持模糊前缀
+        val results = mutableListOf<CaptureRecord>()
+
+        // 1. 如果是“时效性”或“针对记录/截图的通用泛指”查询，直接把最近的 3 条记录加到候选列表中
+        val q = query.trim()
+        val recencyKeywords = listOf("刚才", "刚刚", "最近", "最新", "上一个", "上一张", "上条", "上一条", "刚", "最新的一张", "最后一张", "最后一篇", "上一次", "前一个", "前一张")
+        val generalKeywords = listOf("截图", "截屏", "图片", "照片", "笔记", "记录", "东西", "画面", "屏幕", "历史")
+        
+        val hasRecency = recencyKeywords.any { q.contains(it) }
+        val hasGeneral = generalKeywords.any { q.contains(it) }
+        
+        if (hasRecency || (hasGeneral && q.length < 8)) {
+            val allRecent = dao.getAllCaptures()
+            results.addAll(allRecent.take(3))
+        }
+
+        // 2. 尝试使用 FTS MATCH 全文搜索。将搜索词用空格分割并加上 * 支持模糊前缀
         val terms = cleanedQuery.split(Regex("\\s+")).filter { it.isNotEmpty() }
         val ftsQuery = terms.joinToString(" AND ") { "$it*" }
         
-        var results = emptyList<CaptureRecord>()
-        try {
-            results = dao.searchCaptures(ftsQuery)
+        val ftsResults = try {
+            dao.searchCaptures(ftsQuery)
         } catch (e: Exception) {
             Log.e("ChatViewModel", "FTS search failed, fallback to manual filters", e)
+            emptyList()
+        }
+        
+        // 合并 FTS 结果，并对候选去重
+        for (record in ftsResults) {
+            if (results.none { it.id == record.id }) {
+                results.add(record)
+            }
         }
 
-        // 2. 如果 FTS 没有匹配结果，降级使用传统数据库的模糊查询 (LIKE) 遍历匹配
+        // 3. 如果还是没有匹配结果，且非时效性查询，降级使用传统数据库的模糊查询 (LIKE) 遍历匹配
         if (results.isEmpty()) {
             val allRecords = dao.getAllCaptures()
-            results = allRecords.filter { record ->
+            val likeResults = allRecords.filter { record ->
                 terms.any { term ->
                     record.title.contains(term, ignoreCase = true) ||
                     record.summary.contains(term, ignoreCase = true) ||
@@ -108,10 +130,11 @@ class ChatViewModel(context: Context) : ViewModel() {
                     record.tags.contains(term, ignoreCase = true)
                 }
             }
+            results.addAll(likeResults)
         }
 
-        // 限制上下文最多 5 条记录，避免 Prompt 溢出
-        return results.take(5)
+        // 对最终数据按照时间戳降序重排，取前 5 条相关记录注入上下文
+        return results.distinctBy { it.id }.sortedByDescending { it.timestamp }.take(5)
     }
 
     fun clearHistory() {
