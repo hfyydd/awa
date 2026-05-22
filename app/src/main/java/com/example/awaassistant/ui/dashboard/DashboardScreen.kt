@@ -94,6 +94,9 @@ fun DashboardScreen(
         }
     }
 
+    var showNoteDialog by remember { mutableStateOf(false) }
+    var noteInputText by remember { mutableStateOf("") }
+
     Scaffold(
         topBar = {
             if (showTopBar) {
@@ -166,11 +169,14 @@ fun DashboardScreen(
                         )
 
                         ActionCard(
-                            title = "知识库问答",
-                            subtitle = "基于本地记录聊天",
-                            icon = Icons.Default.Chat,
+                            title = "记录便签",
+                            subtitle = "手动输入便签/待办",
+                            icon = Icons.Default.Edit,
                             gradientColors = listOf(Color(0xFF00C9FF), Color(0xFF92FE9D)),
-                            onClick = onNavigateToChat,
+                            onClick = {
+                                noteInputText = ""
+                                showNoteDialog = true
+                            },
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -220,6 +226,79 @@ fun DashboardScreen(
                 }
             }
         }
+    }
+
+    if (showNoteDialog) {
+        AlertDialog(
+            onDismissRequest = { showNoteDialog = false },
+            title = {
+                Text(
+                    text = "新建便签/待办",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = noteInputText,
+                        onValueChange = { noteInputText = it },
+                        placeholder = {
+                            Text(
+                                text = "写下你的便签，例如：\n“明天下午3点打电话给张三开会”\n“周五下班前买牛奶”\nAI 会自动分析内容并为你设置闹钟。",
+                                color = Color.Gray,
+                                fontSize = 13.sp
+                            )
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(140.dp),
+                        maxLines = 8,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF8E2DE2),
+                            unfocusedBorderColor = Color(0x33FFFFFF),
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (noteInputText.trim().isNotEmpty()) {
+                            viewModel.addNewNote(context, noteInputText)
+                            showNoteDialog = false
+                        }
+                    },
+                    enabled = noteInputText.trim().isNotEmpty(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF8E2DE2),
+                        contentColor = Color.White,
+                        disabledContainerColor = Color(0x338E2DE2),
+                        disabledContentColor = Color.Gray
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("保存并分析")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showNoteDialog = false }
+                ) {
+                    Text("取消", color = Color.LightGray)
+                }
+            },
+            containerColor = Color(0xFF1E1430),
+            shape = RoundedCornerShape(16.dp)
+        )
     }
 }
 
