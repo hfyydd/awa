@@ -25,14 +25,7 @@ class ChatViewModel(context: Context) : ViewModel() {
     private val db = AppDatabase.getDatabase(context.applicationContext)
     private val dao = db.appDao()
 
-    private val _messages = MutableStateFlow<List<ChatMessage>>(
-        listOf(
-            ChatMessage(
-                role = "assistant",
-                content = "你好！我是 Awa 智能助手。你可以向我提问关于已保存截图或工作手记的任何内容。例如：“我上周二记录的会议结论是什么？”"
-            )
-        )
-    )
+    private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
@@ -122,12 +115,7 @@ class ChatViewModel(context: Context) : ViewModel() {
     }
 
     fun clearHistory() {
-        _messages.value = listOf(
-            ChatMessage(
-                role = "assistant",
-                content = "对话历史已清空。您可以继续向我提问关于已保存记录的内容！"
-            )
-        )
+        _messages.value = emptyList()
     }
 
     class Factory(private val context: Context) : ViewModelProvider.Factory {

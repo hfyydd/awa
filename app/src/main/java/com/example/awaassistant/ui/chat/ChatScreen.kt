@@ -1,16 +1,24 @@
 package com.example.awaassistant.ui.chat
 
+import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.Description
@@ -22,19 +30,110 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil3.compose.AsyncImage
 import com.example.awaassistant.data.CaptureRecord
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+// Represents markdown parsed content blocks
+sealed interface ChatContentBlock {
+    data class CodeBlock(val language: String, val code: String) : ChatContentBlock
+    data class TextBlock(val content: String) : ChatContentBlock
+}
+
+/**
+ * Fast stateful markdown-like parser to extract fenced code blocks and text blocks
+ */
+fun parseMarkdown(text: String): List<ChatContentBlock> {
+    val blocks = mutableListOf<ChatContentBlock>()
+    val parts = text.split("```")
+    for (i in parts.indices) {
+        val part = parts[i]
+        if (i % 2 == 1) {
+            // Code block segment
+            val lines = part.split("\n", limit = 2)
+            if (lines.size >= 2) {
+                val lang = lines[0].trim()
+                val code = lines[1].trimEnd()
+                blocks.add(ChatContentBlock.CodeBlock(lang, code))
+            } else {
+                blocks.add(ChatContentBlock.CodeBlock("", part.trim()))
+            }
+        } else {
+            // Normal text block
+            if (part.isNotEmpty()) {
+                blocks.add(ChatContentBlock.TextBlock(part))
+            }
+        }
+    }
+    return blocks
+}
+
+/**
+ * Formats inline bold text and inline code backticks using SpanStyle
+ */
+fun buildAnnotatedStringWithInlineStyles(text: String): AnnotatedString {
+    return buildAnnotatedString {
+        var i = 0
+        while (i < text.length) {
+            when {
+                text.startsWith("**", i) -> {
+                    val end = text.indexOf("**", i + 2)
+                    if (end != -1) {
+                        pushStyle(SpanStyle(fontWeight = FontWeight.Bold, color = Color.White))
+                        append(text.substring(i + 2, end))
+                        pop()
+                        i = end + 2
+                    } else {
+                        append("**")
+                        i += 2
+                    }
+                }
+                text.startsWith("`", i) -> {
+                    val end = text.indexOf("`", i + 1)
+                    if (end != -1) {
+                        pushStyle(
+                            SpanStyle(
+                                fontFamily = FontFamily.Monospace,
+                                color = Color(0xFFFF8A65),
+                                background = Color(0x22FFFFFF)
+                            )
+                        )
+                        append(text.substring(i + 1, end))
+                        pop()
+                        i = end + 1
+                    } else {
+                        append("`")
+                        i += 1
+                    }
+                }
+                else -> {
+                    append(text[i])
+                    i += 1
+                }
+            }
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
     onBack: () -> Unit,
+    onNavigateToDetail: (Long) -> Unit,
     modifier: Modifier = Modifier,
     showTopBar: Boolean = true,
     viewModel: ChatViewModel = viewModel(factory = ChatViewModel.Factory(LocalContext.current))
@@ -43,15 +142,27 @@ fun ChatScreen(
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
-
+    val coroutineScope = rememberCoroutineScope()
     var inputText by remember { mutableStateOf("") }
 
-    // 当消息列表更新时，自动滚动到底部
+    // Auto-scroll to bottom on list update
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
         }
     }
+
+    // Infinite cosmic background breathing transition
+    val infiniteTransition = rememberInfiniteTransition(label = "cosmic")
+    val cosmicProgress by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(20000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "rotation"
+    )
 
     Scaffold(
         topBar = {
@@ -72,86 +183,222 @@ fun ChatScreen(
                 )
             }
         },
-        containerColor = if (showTopBar) Color(0xFF0F0C1B) else Color.Transparent
+        containerColor = Color.Transparent, // Managed by custom background
+        modifier = modifier.fillMaxSize()
     ) { paddingValues ->
-        Column(
-            modifier = modifier
+        Box(
+            modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues)
                 .background(
                     Brush.verticalGradient(
-                        colors = listOf(Color(0xFF0F0C1B), Color(0xFF160F25), Color(0xFF0C0716))
+                        colors = listOf(Color(0xFF0A0714), Color(0xFF120D22), Color(0xFF07040A))
                     )
                 )
         ) {
-            // 消息展示区
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(top = 16.dp, bottom = 16.dp)
-            ) {
-                items(messages) { message ->
-                    MessageBubble(message = message)
-                }
+            // Cosmic dust ambient glow canvas
+            androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                val width = size.width
+                val height = size.height
+                val sinVal = kotlin.math.sin((cosmicProgress * Math.PI / 180f)).toFloat()
+                val pulsate = 1f + 0.15f * sinVal
 
-                // AI 正在思考时的加载动画气泡
-                if (isLoading) {
-                    item {
-                        ThinkingBubble()
-                    }
-                }
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(Color(0x1F8E2DE2), Color.Transparent),
+                        center = androidx.compose.ui.geometry.Offset(width * 0.8f, height * 0.2f),
+                        radius = width * 0.7f * pulsate
+                    ),
+                    center = androidx.compose.ui.geometry.Offset(width * 0.8f, height * 0.2f),
+                    radius = width * 0.7f * pulsate
+                )
+
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(Color(0x164A00E0), Color.Transparent),
+                        center = androidx.compose.ui.geometry.Offset(width * 0.1f, height * 0.8f),
+                        radius = width * 0.8f * (2f - pulsate)
+                    ),
+                    center = androidx.compose.ui.geometry.Offset(width * 0.1f, height * 0.8f),
+                    radius = width * 0.8f * (2f - pulsate)
+                )
             }
 
-            // 底部输入区
-            Surface(
-                color = Color(0xFF130D22),
-                tonalElevation = 8.dp,
-                modifier = Modifier.fillMaxWidth()
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
             ) {
-                Row(
+                // Conversation Area / Onboarding empty state
+                if (messages.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        OnboardingView(
+                            onSelectPreset = { prompt ->
+                                inputText = prompt
+                                viewModel.sendMessage(context, prompt)
+                            }
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp) // Generous bottom padding for input bar overlap
+                    ) {
+                        items(messages) { message ->
+                            MessageBubble(
+                                message = message,
+                                onNavigateToDetail = onNavigateToDetail
+                            )
+                        }
+
+                        if (isLoading) {
+                            item {
+                                ThinkingBubble()
+                            }
+                        }
+                    }
+                }
+
+                // Floating Input Bar Area
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 12.dp)
                         .navigationBarsPadding()
-                        .imePadding(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        .imePadding()
                 ) {
-                    TextField(
-                        value = inputText,
-                        onValueChange = { inputText = it },
-                        placeholder = { Text("输入您的问题，如“我昨晚手写的备忘...”", fontSize = 13.sp, color = Color.Gray) },
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(24.dp)),
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Color(0x11FFFFFF),
-                            unfocusedContainerColor = Color(0x11FFFFFF),
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent,
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        ),
-                        maxLines = 4
-                    )
-
-                    FloatingActionButton(
-                        onClick = {
+                    InputCapsule(
+                        text = inputText,
+                        onTextChange = { inputText = it },
+                        onSend = {
                             if (inputText.trim().isNotEmpty()) {
                                 viewModel.sendMessage(context, inputText)
                                 inputText = ""
                             }
-                        },
-                        containerColor = Color(0xFF8E2DE2),
-                        contentColor = Color.White,
-                        shape = RoundedCornerShape(24.dp),
-                        modifier = Modifier.size(48.dp)
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Premium onboarding empty state view with quick suggestion grids
+ */
+@Composable
+fun OnboardingView(
+    onSelectPreset: (String) -> Unit
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 0.95f,
+        targetValue = 1.05f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2200, easing = EaseInOutSine),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseScale"
+    )
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        // Glowing brand logo box
+        Box(
+            modifier = Modifier
+                .size(68.dp)
+                .graphicsLayer(scaleX = pulseScale, scaleY = pulseScale)
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(Color(0xFF8E2DE2), Color(0xFF4A00E0))
+                    ),
+                    shape = RoundedCornerShape(22.dp)
+                )
+                .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(22.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "Awa",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Black,
+                color = Color.White
+            )
+        }
+
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = "Awa AI 智能助手",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color.White
+            )
+            Text(
+                text = "随时提问有关本地知识、屏幕内容和手写笔记的信息",
+                fontSize = 11.sp,
+                color = Color.LightGray
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Grid cells for quick suggestions
+        val suggestions = listOf(
+            Pair("🔍 查找上张截图", "帮我查一下最后一张截图里的关键信息"),
+            Pair("🌐 翻译屏幕英文", "翻译我最新保存的截图里的英文内容"),
+            Pair("📝 总结工作便签", "总结我昨晚拍的工作手记内容"),
+            Pair("💡 解释代码逻辑", "解释一下最后一张截图里的代码是做什么的")
+        )
+
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.fillMaxWidth(),
+            userScrollEnabled = false
+        ) {
+            items(suggestions) { pair ->
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0x0CFFFFFF)),
+                    border = BorderStroke(1.dp, Color(0x10FFFFFF)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelectPreset(pair.second) }
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(Icons.Default.Send, contentDescription = "发送", modifier = Modifier.size(20.dp))
+                        Text(
+                            text = pair.first,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = pair.second,
+                            fontSize = 9.sp,
+                            color = Color.Gray,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            lineHeight = 13.sp
+                        )
                     }
                 }
             }
@@ -159,82 +406,278 @@ fun ChatScreen(
     }
 }
 
+/**
+ * Message Bubble representing ChatMessages
+ */
 @Composable
-fun MessageBubble(message: ChatMessage) {
+fun MessageBubble(
+    message: ChatMessage,
+    onNavigateToDetail: (Long) -> Unit
+) {
     val isUser = message.role == "user"
     val alignment = if (isUser) Alignment.End else Alignment.Start
-    val bubbleColor = if (isUser) Color(0xFF8E2DE2) else Color(0x15FFFFFF)
-    val textColor = Color.White
 
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = alignment
     ) {
-        // 气泡卡片
-        Card(
-            shape = RoundedCornerShape(
-                topStart = 16.dp,
-                topEnd = 16.dp,
-                bottomStart = if (isUser) 16.dp else 4.dp,
-                bottomEnd = if (isUser) 4.dp else 16.dp
-            ),
-            colors = CardDefaults.cardColors(containerColor = bubbleColor),
-            elevation = CardDefaults.cardElevation(0.dp),
-            modifier = Modifier.widthIn(max = 300.dp)
-        ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    text = message.content,
-                    color = textColor,
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp
-                )
-            }
-        }
-
-        // 如果是大模型回复，且包含引用的本地笔记来源，展示引用卡片
-        if (!isUser && message.sources.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                "引用本地依据：",
-                fontSize = 10.sp,
-                color = Color.Gray,
-                modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
-            )
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
+        if (isUser) {
+            // User message bubble with gradient and asymmetric corners
+            Card(
+                shape = RoundedCornerShape(
+                    topStart = 16.dp,
+                    topEnd = 16.dp,
+                    bottomStart = 16.dp,
+                    bottomEnd = 4.dp
+                ),
+                colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+                modifier = Modifier
+                    .widthIn(max = 280.dp)
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(Color(0xFF8E2DE2), Color(0xFF4A00E0))
+                        ),
+                        shape = RoundedCornerShape(
+                            topStart = 16.dp,
+                            topEnd = 16.dp,
+                            bottomStart = 16.dp,
+                            bottomEnd = 4.dp
+                        )
+                    )
             ) {
-                items(message.sources) { record ->
-                    SourceChip(record = record)
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = message.content,
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp
+                    )
+                }
+            }
+        } else {
+            // AI message bubble with glassmorphic cards and local Markdown parser
+            Card(
+                shape = RoundedCornerShape(
+                    topStart = 16.dp,
+                    topEnd = 16.dp,
+                    bottomStart = 4.dp,
+                    bottomEnd = 16.dp
+                ),
+                colors = CardDefaults.cardColors(containerColor = Color(0x0CFFFFFF)),
+                border = BorderStroke(1.dp, Color(0x12FFFFFF)),
+                modifier = Modifier.widthIn(max = 310.dp)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    val parsedBlocks = remember(message.content) { parseMarkdown(message.content) }
+                    parsedBlocks.forEach { block ->
+                        when (block) {
+                            is ChatContentBlock.TextBlock -> {
+                                RenderTextBlock(text = block.content)
+                            }
+                            is ChatContentBlock.CodeBlock -> {
+                                RenderCodeBlock(lang = block.language, code = block.code)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Sources block (retrieved context documents)
+            if (message.sources.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.padding(start = 4.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .background(Color(0xFF8E2DE2), RoundedCornerShape(3.dp))
+                    )
+                    Text(
+                        "参考本地知识：",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Gray
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(message.sources) { record ->
+                        SourceChip(record = record, onClick = { onNavigateToDetail(record.id) })
+                    }
                 }
             }
         }
     }
 }
 
+/**
+ * Text renderer that supports inline formatting and bullet lists
+ */
 @Composable
-fun SourceChip(record: CaptureRecord) {
+fun RenderTextBlock(text: String) {
+    val lines = text.split("\n")
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        lines.forEach { line ->
+            if (line.trim().startsWith("- ") || line.trim().startsWith("* ")) {
+                val cleanLine = line.trim().substring(2)
+                Row(
+                    modifier = Modifier.padding(start = 8.dp),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text("•", color = Color(0xFF8E2DE2), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text(
+                        text = buildAnnotatedStringWithInlineStyles(cleanLine),
+                        color = Color(0xFFE2E0EB),
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp
+                    )
+                }
+            } else {
+                Text(
+                    text = buildAnnotatedStringWithInlineStyles(line),
+                    color = Color(0xFFE2E0EB),
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Custom code block layout with dynamic Copy button
+ */
+@Composable
+fun RenderCodeBlock(lang: String, code: String) {
+    val context = LocalContext.current
+    var isCopied by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isCopied) {
+        if (isCopied) {
+            delay(2000)
+            isCopied = false
+        }
+    }
+
     Card(
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF07050F)),
+        border = BorderStroke(1.dp, Color(0x1AFFFFFF)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF100D1C))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = lang.ifEmpty { "code" }.uppercase(),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Gray
+                )
+
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            val clip = android.content.ClipData.newPlainText("awa_code", code)
+                            clipboard.setPrimaryClip(clip)
+                            isCopied = true
+                        }
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    if (isCopied) {
+                        Text("已复制", fontSize = 10.sp, color = Color(0xFF00E676), fontWeight = FontWeight.Bold)
+                    } else {
+                        Text("复制", fontSize = 10.sp, color = Color.LightGray)
+                    }
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp)
+            ) {
+                Text(
+                    text = code,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    color = Color(0xFFDCD8E8),
+                    lineHeight = 18.sp
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Clickable referenced capture chip with image previews
+ */
+@Composable
+fun SourceChip(
+    record: CaptureRecord,
+    onClick: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0x0CFFFFFF)),
+        border = BorderStroke(1.dp, Color(0x12FFFFFF)),
         modifier = Modifier
             .width(160.dp)
-            .height(44.dp)
+            .height(48.dp)
+            .clickable { onClick() }
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(
-                Icons.Default.Description,
-                contentDescription = null,
-                tint = Color(0xFF00C9FF),
-                modifier = Modifier.size(16.dp)
-            )
+            if (record.imagePath != null) {
+                AsyncImage(
+                    model = record.imagePath,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0x22FFFFFF))
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(Color(0x12FFFFFF), RoundedCornerShape(6.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.Description,
+                        contentDescription = null,
+                        tint = Color(0xFF8E2DE2),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = record.title,
@@ -254,70 +697,176 @@ fun SourceChip(record: CaptureRecord) {
     }
 }
 
+/**
+ * Premium floating input capsule layout with dynamic Send triggers
+ */
+@Composable
+fun InputCapsule(
+    text: String,
+    onTextChange: (String) -> Unit,
+    onSend: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                color = Color(0xE5150E28),
+                shape = RoundedCornerShape(30.dp)
+            )
+            .border(
+                width = 1.dp,
+                color = Color(0x20FFFFFF),
+                shape = RoundedCornerShape(30.dp)
+            )
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        // Left Accessory Plus Button
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .background(Color(0x0EFFFFFF), RoundedCornerShape(19.dp))
+                .clickable { /* Attachments action */ },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Default.Add,
+                contentDescription = "添加",
+                tint = Color.LightGray,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+
+        // Inner TextField with custom decoration
+        BasicTextField(
+            value = text,
+            onValueChange = onTextChange,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = Color.White),
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 8.dp),
+            maxLines = 4,
+            decorationBox = { innerTextField ->
+                Box(contentAlignment = Alignment.CenterStart) {
+                    if (text.isEmpty()) {
+                        Text(
+                            text = "输入问题，如“我昨晚手写的备忘...”",
+                            color = Color.Gray,
+                            fontSize = 13.sp
+                        )
+                    }
+                    innerTextField()
+                }
+            }
+        )
+
+        // Dynamic Send FAB with transition scaling
+        val buttonVisible = text.trim().isNotEmpty()
+        val scale by animateFloatAsState(
+            targetValue = if (buttonVisible) 1f else 0.8f,
+            label = "sendScale"
+        )
+        val opacity by animateFloatAsState(
+            targetValue = if (buttonVisible) 1f else 0.5f,
+            label = "sendAlpha"
+        )
+
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .graphicsLayer(
+                    scaleX = scale,
+                    scaleY = scale,
+                    alpha = opacity
+                )
+                .background(
+                    Brush.linearGradient(
+                        colors = if (buttonVisible) {
+                            listOf(Color(0xFF8E2DE2), Color(0xFF4A00E0))
+                        } else {
+                            listOf(Color(0x338E2DE2), Color(0x334A00E0))
+                        }
+                    ),
+                    shape = RoundedCornerShape(19.dp)
+                )
+                .clickable(enabled = buttonVisible) { onSend() },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Default.Send,
+                contentDescription = "发送",
+                tint = Color.White,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+/**
+ * Thinking indicator containing 3 bouncing particles
+ */
 @Composable
 fun ThinkingBubble() {
     val infiniteTransition = rememberInfiniteTransition(label = "thinking")
-    val dot1Scale by infiniteTransition.animateFloat(
-        initialValue = 0.4f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(600, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "dot1"
-    )
-    val dot2Scale by infiniteTransition.animateFloat(
-        initialValue = 0.4f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(600, delayMillis = 200, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "dot2"
-    )
-    val dot3Scale by infiniteTransition.animateFloat(
-        initialValue = 0.4f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(600, delayMillis = 400, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "dot3"
-    )
 
-    Column(
+    @Composable
+    fun animateDotOffset(delay: Int): Float {
+        val floatState by infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = -8f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(500, delayMillis = delay, easing = EaseInOutSine),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "thinkingDot"
+        )
+        return floatState
+    }
+
+    Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.Start
+        horizontalArrangement = Arrangement.Start
     ) {
         Card(
-            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0x15FFFFFF)),
-            modifier = Modifier.width(80.dp)
+            shape = RoundedCornerShape(
+                topStart = 16.dp,
+                topEnd = 16.dp,
+                bottomStart = 4.dp,
+                bottomEnd = 16.dp
+            ),
+            colors = CardDefaults.cardColors(containerColor = Color(0x0CFFFFFF)),
+            border = BorderStroke(1.dp, Color(0x12FFFFFF)),
+            modifier = Modifier.width(76.dp)
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(12.dp),
+                    .padding(horizontal = 14.dp, vertical = 14.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                val dot1 = animateDotOffset(0)
+                val dot2 = animateDotOffset(150)
+                val dot3 = animateDotOffset(300)
+
                 Box(
                     modifier = Modifier
-                        .size(6.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(Color.White.copy(alpha = dot1Scale))
+                        .size(5.dp)
+                        .graphicsLayer(translationY = dot1)
+                        .background(Color(0xFF8E2DE2), RoundedCornerShape(2.5.dp))
                 )
                 Box(
                     modifier = Modifier
-                        .size(6.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(Color.White.copy(alpha = dot2Scale))
+                        .size(5.dp)
+                        .graphicsLayer(translationY = dot2)
+                        .background(Color(0xFF7A22D2), RoundedCornerShape(2.5.dp))
                 )
                 Box(
                     modifier = Modifier
-                        .size(6.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(Color.White.copy(alpha = dot3Scale))
+                        .size(5.dp)
+                        .graphicsLayer(translationY = dot3)
+                        .background(Color(0xFF4A00E0), RoundedCornerShape(2.5.dp))
                 )
             }
         }

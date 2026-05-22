@@ -130,7 +130,8 @@ fun MainPagerScreen(
                     ChatScreen(
                         showTopBar = false,
                         viewModel = chatViewModel,
-                        onBack = {}
+                        onBack = {},
+                        onNavigateToDetail = onNavigateToDetail
                     )
                 }
                 1 -> {

@@ -38,7 +38,8 @@ fun MainNavigation(recordIdToShow: Long? = null) {
             }
             entry<Chat> {
                 ChatScreen(
-                    onBack = { backStack.removeLastOrNull() }
+                    onBack = { backStack.removeLastOrNull() },
+                    onNavigateToDetail = { id -> backStack.add(NoteDetail(id)) }
                 )
             }
             entry<Settings> {
