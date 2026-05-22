@@ -55,15 +55,26 @@ object OpenAiCompatibleClient {
             val currentTimeString = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
 
             val promptContent = """
-                你是一个个人 AI 助手。请分析以下屏幕文本或拍照笔记内容，并整理成 JSON 格式返回。
+                你是一个个人 AI 助手。请分析以下屏幕文本或拍照笔记内容，并整理成符合以下 JSON Schema 格式的 JSON 字符串返回。
                 当前系统时间是: $currentTimeString
                 
+                【JSON 格式要求】
+                {
+                  "title": "简短切题的标题（10字以内，比如'接姥姥姥爷'）",
+                  "summary": "以易读的 Markdown 列表形式整理的文本摘要（纠正错别字，理顺句子排版，必须是规范的简体中文，比如'- 下午六点去接姥姥姥爷'）",
+                  "tags": ["标签1", "标签2"], // 1 到 3 个描述性标签
+                  "reminders": [ // 待办提醒列表，如无明确提醒时间，请保持为空列表 []。严禁胡乱编造时间。
+                    {
+                      "title": "提醒的内容（15字以内）",
+                      "timeString": "格式必须是 YYYY-MM-DD HH:mm:ss（例如 '2026-05-22 18:00:00'）"
+                    }
+                  ]
+                }
+
                 【整理要求】
-                1. 规范语言：如果输入中包含错别字，请予以纠正；理顺句子排版，以易读的 Markdown 列表形式输出在 "summary" 中。所有输出内容必须使用规范的简体中文。
-                2. 提炼标题：生成一个简短切题的标题（10字以内），放在 "title" 中。
-                3. 提取标签：生成 1 到 3 个描述性标签，放在 "tags" 数组中。
-                4. 提取提醒：如果内容中明确包含可作为待办提醒的事项与时间，请将其提取到 "reminders" 列表中。时间格式必须是 YYYY-MM-DD HH:mm:ss。如无明确提醒时间，请将 "reminders" 保持为空列表，严禁胡乱猜测或胡编乱造时间。
-                5. 输出格式：直接输出纯 JSON 字符串，严禁包含任何 Markdown 格式包裹（如 ```json 等），保持输出极其简洁以提高处理速度。
+                1. 规范语言：如果输入中包含错别字，请予以纠正；理顺句子排版。
+                2. 提取提醒：如无明确提醒时间，请将 "reminders" 保持为空列表，严禁胡乱猜测或胡编乱造时间。
+                3. 输出格式：直接输出纯 JSON 字符串，严禁包含任何 Markdown 格式包裹（如 ```json 等），保持输出极其简洁以提高处理速度。
                 
                 【输入内容】
                 $rawText
@@ -360,11 +371,21 @@ object OpenAiCompatibleClient {
             val remindersArray = json.optJSONArray("reminders")
             if (remindersArray != null) {
                 for (i in 0 until remindersArray.length()) {
-                    val rem = remindersArray.getJSONObject(i)
-                    val remTitle = rem.optString("title", "")
-                    val remTime = rem.optString("timeString", "")
-                    if (remTitle.isNotEmpty() && remTime.isNotEmpty()) {
-                        remindersList.add(ReminderSuggestion(remTitle, remTime))
+                    try {
+                        val element = remindersArray.get(i)
+                        if (element is JSONObject) {
+                            val remTitle = element.optString("title", "")
+                            val remTime = element.optString("timeString", "")
+                            if (remTitle.isNotEmpty() && remTime.isNotEmpty()) {
+                                remindersList.add(ReminderSuggestion(remTitle, remTime))
+                            }
+                        } else if (element is String) {
+                            if (element.trim().isNotEmpty()) {
+                                remindersList.add(ReminderSuggestion(title, element.trim()))
+                            }
+                        }
+                    } catch (ex: Exception) {
+                        Log.e(TAG, "Failed to parse single reminder item at index $i", ex)
                     }
                 }
             }
