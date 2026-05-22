@@ -42,57 +42,57 @@ object OpenAiCompatibleClient {
      * 调用大模型分析屏幕文字或笔记 OCR 文本
      */
     suspend fun analyzeText(context: Context, rawText: String): AnalysisResult? = withContext(Dispatchers.IO) {
-        val apiKey = SettingsManager.getApiKey(context)
-        val baseUrl = SettingsManager.getBaseUrl(context)
-        val model = SettingsManager.getModelName(context)
-
-        if (apiKey.isEmpty()) {
-            Log.e(TAG, "API Key is empty, skipping AI analysis.")
-            return@withContext null
-        }
-
-        val currentTimeString = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
-
-        val promptContent = """
-            你是一个个人 AI 助手。请分析以下屏幕文本或拍照笔记内容，并整理成 JSON 格式返回。
-            当前系统时间是: $currentTimeString
-            
-            【整理要求】
-            1. 规范语言：如果输入中包含错别字，请予以纠正；理顺句子排版，以易读的 Markdown 列表形式输出在 "summary" 中。所有输出内容必须使用规范的简体中文。
-            2. 提炼标题：生成一个简短切题的标题（10字以内），放在 "title" 中。
-            3. 提取标签：生成 1 到 3 个描述性标签，放在 "tags" 数组中。
-            4. 提取提醒：如果内容中明确包含可作为待办提醒的事项与时间，请将其提取到 "reminders" 列表中。时间格式必须是 YYYY-MM-DD HH:mm:ss。如无明确提醒时间，请将 "reminders" 保持为空列表，严禁胡乱猜测或胡编乱造时间。
-            5. 输出格式：直接输出纯 JSON 字符串，严禁包含任何 Markdown 格式包裹（如 ```json 等），保持输出极其简洁以提高处理速度。
-            
-            【输入内容】
-            $rawText
-        """.trimIndent()
-
-        val messages = JSONArray().apply {
-            put(JSONObject().apply {
-                put("role", "user")
-                put("content", promptContent)
-            })
-        }
-
-        val payload = JSONObject().apply {
-            put("model", model)
-            put("messages", messages)
-            put("temperature", 0.1)
-            put("max_tokens", 1000)
-        }
-
-        val requestBody = payload.toString().toRequestBody(JSON_MEDIA_TYPE)
-        val requestUrl = if (baseUrl.endsWith("/")) "${baseUrl}chat/completions" else "$baseUrl/chat/completions"
-
-        val request = Request.Builder()
-            .url(requestUrl)
-            .addHeader("Authorization", "Bearer $apiKey")
-            .addHeader("Content-Type", "application/json")
-            .post(requestBody)
-            .build()
-
         try {
+            val apiKey = SettingsManager.getApiKey(context)
+            val baseUrl = SettingsManager.getBaseUrl(context)
+            val model = SettingsManager.getModelName(context)
+
+            if (apiKey.isEmpty()) {
+                Log.e(TAG, "API Key is empty, skipping AI analysis.")
+                return@withContext null
+            }
+
+            val currentTimeString = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+
+            val promptContent = """
+                你是一个个人 AI 助手。请分析以下屏幕文本或拍照笔记内容，并整理成 JSON 格式返回。
+                当前系统时间是: ${'$'}currentTimeString
+                
+                【整理要求】
+                1. 规范语言：如果输入中包含错别字，请予以纠正；理顺句子排版，以易读的 Markdown 列表形式输出在 "summary" 中。所有输出内容必须使用规范的简体中文。
+                2. 提炼标题：生成一个简短切题的标题（10字以内），放在 "title" 中。
+                3. 提取标签：生成 1 到 3 个描述性标签，放在 "tags" 数组中。
+                4. 提取提醒：如果内容中明确包含可作为待办提醒的事项与时间，请将其提取到 "reminders" 列表中。时间格式必须是 YYYY-MM-DD HH:mm:ss。如无明确提醒时间，请将 "reminders" 保持为空列表，严禁胡乱猜测或胡编乱造时间。
+                5. 输出格式：直接输出纯 JSON 字符串，严禁包含任何 Markdown 格式包裹（如 ```json 等），保持输出极其简洁以提高处理速度。
+                
+                【输入内容】
+                ${'$'}rawText
+            """.trimIndent()
+
+            val messages = JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "user")
+                    put("content", promptContent)
+                })
+            }
+
+            val payload = JSONObject().apply {
+                put("model", model)
+                put("messages", messages)
+                put("temperature", 0.1)
+                put("max_tokens", 16384)
+            }
+
+            val requestBody = payload.toString().toRequestBody(JSON_MEDIA_TYPE)
+            val requestUrl = if (baseUrl.endsWith("/")) "${baseUrl}chat/completions" else "$baseUrl/chat/completions"
+
+            val request = Request.Builder()
+                .url(requestUrl)
+                .addHeader("Authorization", "Bearer ${'$'}apiKey")
+                .addHeader("Content-Type", "application/json")
+                .post(requestBody)
+                .build()
+
             httpClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     Log.e(TAG, "Request failed: ${response.code} ${response.message}")
@@ -100,7 +100,7 @@ object OpenAiCompatibleClient {
                 }
 
                 val responseBody = response.body?.string() ?: return@withContext null
-                Log.d(TAG, "Response: $responseBody")
+                Log.d(TAG, "Response: ${'$'}responseBody")
 
                 val jsonResponse = JSONObject(responseBody)
                 val choices = jsonResponse.getJSONArray("choices")
@@ -377,11 +377,24 @@ object OpenAiCompatibleClient {
     }
 
     private fun extractJson(text: String): String {
-        val startIndex = text.indexOf('{')
-        val endIndex = text.lastIndexOf('}')
-        if (startIndex != -1 && endIndex != -1 && endIndex > startIndex) {
-            return text.substring(startIndex, endIndex + 1)
+        var cleanedText = text
+        // Remove <think>...</think> blocks (including open-ended or truncated ones)
+        while (cleanedText.contains("<think>")) {
+            val start = cleanedText.indexOf("<think>")
+            val end = cleanedText.indexOf("</think>")
+            if (end != -1 && end > start) {
+                cleanedText = cleanedText.substring(0, start) + cleanedText.substring(end + 8)
+            } else {
+                cleanedText = cleanedText.substring(0, start)
+                break
+            }
         }
-        return text
+
+        val startIndex = cleanedText.indexOf('{')
+        val endIndex = cleanedText.lastIndexOf('}')
+        if (startIndex != -1 && endIndex != -1 && endIndex > startIndex) {
+            return cleanedText.substring(startIndex, endIndex + 1)
+        }
+        return cleanedText
     }
 }

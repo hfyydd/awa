@@ -18,6 +18,7 @@ import com.example.awaassistant.data.AppDatabase
 import com.example.awaassistant.data.CaptureRecord
 import com.example.awaassistant.data.OpenAiCompatibleClient
 import com.example.awaassistant.data.ReminderItem
+import com.example.awaassistant.data.AnalysisResult
 import com.example.awaassistant.util.ChineseConverter
 import com.example.awaassistant.util.LocalOcrHelper
 import com.example.awaassistant.util.ReminderScheduler
@@ -194,47 +195,79 @@ class AwaAccessibilityService : AccessibilityService() {
                 val timestamp = System.currentTimeMillis()
 
                 serviceScope.launch(Dispatchers.IO) {
-                    val initialRecord = CaptureRecord(
-                        title = "系统截屏整理中...",
-                        summary = "AI 正在识别屏幕内容并提炼总结，请稍候...",
-                        rawContent = "",
-                        imagePath = null,
-                        timestamp = timestamp,
-                        tags = "处理中",
-                        sourceType = "SCREENSHOT"
-                    )
-                    val recordId = dao.insertCapture(initialRecord)
-                    if (recordId == -1L) return@launch
-
-                    // 将图片另存到 App 私有目录（防用户删除了原图）
-                    val imagePath = saveBitmapToFile(bitmap)
-                    
-                    val currentRecord = dao.getCaptureById(recordId)
-                    if (currentRecord != null) {
-                        dao.updateCapture(currentRecord.copy(imagePath = imagePath, summary = "AI 正在分析提取的内容，请稍候..."))
-                    }
-
-                    var finalOcrText = ""
+                    var recordId: Long = -1
                     try {
-                        finalOcrText = LocalOcrHelper.recognizeText(bitmap)
-                        Log.d(TAG, "Extracted OCR Text from system screenshot: $finalOcrText")
-                    } catch (e: Exception) {
-                        Log.e(TAG, "OCR recognition failed", e)
-                    }
+                        val initialRecord = CaptureRecord(
+                            title = "系统截屏整理中...",
+                            summary = "AI 正在识别屏幕内容并提炼总结，请稍候...",
+                            rawContent = "",
+                            imagePath = null,
+                            timestamp = timestamp,
+                            tags = "处理中",
+                            sourceType = "SCREENSHOT"
+                        )
+                        recordId = dao.insertCapture(initialRecord)
+                        if (recordId == -1L) return@launch
 
-                    if (finalOcrText.trim().isEmpty()) {
-                        val failedRecord = dao.getCaptureById(recordId)
-                        if (failedRecord != null) {
-                            dao.updateCapture(failedRecord.copy(
-                                title = "未识别到内容",
-                                summary = "未能从当前系统截屏中读取到任何文字。",
-                                tags = "识别失败"
-                            ))
+                        // 将图片另存到 App 私有目录（防用户删除了原图）
+                        val imagePath = try {
+                            saveBitmapToFile(bitmap)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to save bitmap", e)
+                            null
                         }
-                        return@launch
-                    }
+                        
+                        try {
+                            val currentRecord = dao.getCaptureById(recordId)
+                            if (currentRecord != null) {
+                                dao.updateCapture(currentRecord.copy(imagePath = imagePath, summary = "AI 正在分析提取的内容，请稍候..."))
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to update record with imagePath", e)
+                        }
 
-                    processAndSaveCapturedContentAsync(dao, recordId, finalOcrText, imagePath, "SCREENSHOT")
+                        var finalOcrText = ""
+                        try {
+                            finalOcrText = LocalOcrHelper.recognizeText(bitmap)
+                            Log.d(TAG, "Extracted OCR Text from system screenshot: $finalOcrText")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "OCR recognition failed", e)
+                        }
+
+                        if (finalOcrText.trim().isEmpty()) {
+                            try {
+                                val failedRecord = dao.getCaptureById(recordId)
+                                if (failedRecord != null) {
+                                    dao.updateCapture(failedRecord.copy(
+                                        title = "未识别到内容",
+                                        summary = "未能从当前系统截屏中读取到任何文字。",
+                                        tags = "识别失败"
+                                    ))
+                                }
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Failed to update failure state in DB", e)
+                            }
+                            return@launch
+                        }
+
+                        processAndSaveCapturedContentAsync(dao, recordId, finalOcrText, imagePath, "SCREENSHOT")
+                    } catch (e: Throwable) {
+                        Log.e(TAG, "Exception in handleDetectedScreenshot coroutine", e)
+                        if (recordId != -1L) {
+                            try {
+                                val failedRecord = dao.getCaptureById(recordId)
+                                if (failedRecord != null) {
+                                    dao.updateCapture(failedRecord.copy(
+                                        title = "分析失败",
+                                        summary = "处理系统截屏时发生错误: ${e.localizedMessage}",
+                                        tags = "分析失败"
+                                    ))
+                                }
+                            } catch (dbEx: Throwable) {
+                                Log.e(TAG, "Failed to update error status in DB", dbEx)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -288,85 +321,138 @@ class AwaAccessibilityService : AccessibilityService() {
                     FloatingOverlayService.instance?.showFloatingBubble()
                     
                     serviceScope.launch(Dispatchers.Default) {
-                        // 等待数据库插入任务完成，以获取 recordId
-                        recordInsertJob.join()
-                        val finalRecordId = recordId
-                        if (finalRecordId == -1L) return@launch
-                        
-                        if (bitmap != null) {
-                            // 提示用户截图已捕获并开始后台分析
-                            withContext(Dispatchers.Main) {
-                                Toast.makeText(this@AwaAccessibilityService, "屏幕截图已捕获，后台整理中...", Toast.LENGTH_SHORT).show()
-                                // 触发闪屏特效提示用户
-                                FloatingOverlayService.instance?.triggerScreenFlash()
-                            }
+                        try {
+                            // 等待数据库插入任务完成，以获取 recordId
+                            recordInsertJob.join()
+                            val finalRecordId = recordId
+                            if (finalRecordId == -1L) return@launch
+                            
+                            if (bitmap != null) {
+                                // 提示用户截图已捕获并开始后台分析
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(this@AwaAccessibilityService, "屏幕截图已捕获，后台整理中...", Toast.LENGTH_SHORT).show()
+                                    // 触发闪屏特效提示用户
+                                    FloatingOverlayService.instance?.triggerScreenFlash()
+                                }
 
-                            // 保存图片文件
-                            val imagePath = saveBitmapToFile(bitmap)
-
-                            // 立即更新数据库记录，使缩略图和新的提示信息显示在界面上
-                            val currentRecord = dao.getCaptureById(finalRecordId)
-                            if (currentRecord != null) {
-                                dao.updateCapture(currentRecord.copy(imagePath = imagePath, summary = "AI 正在分析提取的内容，请稍候..."))
-                            }
-
-                            // 启动后台任务进行耗时的 OCR 与大模型分析，完全不阻碍主进程
-                            launch(Dispatchers.IO) {
-                                var finalOcrText = ""
-                                try {
-                                    finalOcrText = LocalOcrHelper.recognizeText(bitmap)
-                                    Log.d(TAG, "Extracted OCR Text: $finalOcrText")
+                                // 保存图片文件
+                                val imagePath = try {
+                                    saveBitmapToFile(bitmap)
                                 } catch (e: Exception) {
-                                    Log.e(TAG, "OCR recognition failed", e)
+                                    Log.e(TAG, "Failed to save bitmap", e)
+                                    null
                                 }
 
-                                val combinedText = buildString {
-                                    if (layoutText.trim().isNotEmpty()) {
-                                        append("【屏幕窗口文本内容】\n")
-                                        append(layoutText)
-                                        append("\n\n")
+                                // 立即更新数据库记录，使缩略图和新的提示信息显示在界面上
+                                try {
+                                    val currentRecord = dao.getCaptureById(finalRecordId)
+                                    if (currentRecord != null) {
+                                        dao.updateCapture(currentRecord.copy(imagePath = imagePath, summary = "AI 正在分析提取的内容，请稍候..."))
                                     }
-                                    if (finalOcrText.trim().isNotEmpty()) {
-                                        append("【屏幕 OCR 图像识别内容】\n")
-                                        append(finalOcrText)
-                                    }
-                                }.trim()
-
-                                if (combinedText.isEmpty()) {
-                                    val failedRecord = dao.getCaptureById(finalRecordId)
-                                    if (failedRecord != null) {
-                                        dao.updateCapture(failedRecord.copy(
-                                            title = "未识别到内容",
-                                            summary = "未能从当前屏幕中读取到任何文字。",
-                                            tags = "识别失败"
-                                        ))
-                                    }
-                                    return@launch
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Failed to update record with imagePath", e)
                                 }
 
-                                // 后台与模型交互并填充/更新记录
-                                processAndSaveCapturedContentAsync(dao, finalRecordId, combinedText, imagePath, "SCREENSHOT")
-                            }
-                        } else {
-                            // 截图失败，仅处理文本内容
-                            withContext(Dispatchers.Main) {
-                                Toast.makeText(this@AwaAccessibilityService, "截图失败，将仅对屏幕文本进行后台整理...", Toast.LENGTH_SHORT).show()
-                            }
+                                // 启动后台任务进行耗时的 OCR 与大模型分析，完全不阻碍主进程
+                                launch(Dispatchers.IO) {
+                                    try {
+                                        var finalOcrText = ""
+                                        try {
+                                            finalOcrText = LocalOcrHelper.recognizeText(bitmap)
+                                            Log.d(TAG, "Extracted OCR Text: $finalOcrText")
+                                        } catch (e: Exception) {
+                                            Log.e(TAG, "OCR recognition failed", e)
+                                        }
 
-                            launch(Dispatchers.IO) {
-                                if (layoutText.trim().isEmpty()) {
-                                    val failedRecord = dao.getCaptureById(finalRecordId)
-                                    if (failedRecord != null) {
-                                        dao.updateCapture(failedRecord.copy(
-                                            title = "未识别到内容",
-                                            summary = "未能从当前屏幕的布局中提取到任何文字。",
-                                            tags = "识别失败"
-                                        ))
+                                        val combinedText = buildString {
+                                            if (layoutText.trim().isNotEmpty()) {
+                                                append("【屏幕窗口文本内容】\n")
+                                                append(layoutText)
+                                                append("\n\n")
+                                            }
+                                            if (finalOcrText.trim().isNotEmpty()) {
+                                                append("【屏幕 OCR 图像识别内容】\n")
+                                                append(finalOcrText)
+                                            }
+                                        }.trim()
+
+                                        if (combinedText.isEmpty()) {
+                                            try {
+                                                val failedRecord = dao.getCaptureById(finalRecordId)
+                                                if (failedRecord != null) {
+                                                    dao.updateCapture(failedRecord.copy(
+                                                        title = "未识别到内容",
+                                                        summary = "未能从当前屏幕中读取到任何文字。",
+                                                        tags = "识别失败"
+                                                    ))
+                                                }
+                                            } catch (e: Exception) {
+                                                Log.e(TAG, "Failed to update failure state in DB", e)
+                                            }
+                                            return@launch
+                                        }
+
+                                        // 后台与模型交互并填充/更新记录
+                                        processAndSaveCapturedContentAsync(dao, finalRecordId, combinedText, imagePath, "SCREENSHOT")
+                                    } catch (e: Throwable) {
+                                        Log.e(TAG, "Exception in triggerScreenCapture task with bitmap", e)
+                                        try {
+                                            val failedRecord = dao.getCaptureById(finalRecordId)
+                                            if (failedRecord != null) {
+                                                dao.updateCapture(failedRecord.copy(
+                                                    title = "分析失败",
+                                                    summary = "分析屏幕时发生异常: ${e.localizedMessage}",
+                                                    tags = "分析失败"
+                                                ))
+                                            }
+                                        } catch (dbEx: Throwable) {
+                                            Log.e(TAG, "Failed to update error status in DB", dbEx)
+                                        }
                                     }
-                                    return@launch
                                 }
-                                processAndSaveCapturedContentAsync(dao, finalRecordId, layoutText, null, "SCREENSHOT")
+                            } else {
+                                // 截图失败，仅处理文本内容
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(this@AwaAccessibilityService, "截图失败，将仅对屏幕文本进行后台整理...", Toast.LENGTH_SHORT).show()
+                                }
+
+                                launch(Dispatchers.IO) {
+                                    try {
+                                        if (layoutText.trim().isEmpty()) {
+                                            try {
+                                                val failedRecord = dao.getCaptureById(finalRecordId)
+                                                if (failedRecord != null) {
+                                                    dao.updateCapture(failedRecord.copy(
+                                                        title = "未识别到内容",
+                                                        summary = "未能从当前屏幕的布局中提取到任何文字。",
+                                                        tags = "识别失败"
+                                                    ))
+                                                }
+                                            } catch (e: Exception) {
+                                                Log.e(TAG, "Failed to update failure state in DB", e)
+                                            }
+                                            return@launch
+                                        }
+                                        processAndSaveCapturedContentAsync(dao, finalRecordId, layoutText, null, "SCREENSHOT")
+                                    } catch (e: Throwable) {
+                                        Log.e(TAG, "Exception in triggerScreenCapture task without bitmap", e)
+                                        try {
+                                            val failedRecord = dao.getCaptureById(finalRecordId)
+                                            if (failedRecord != null) {
+                                                dao.updateCapture(failedRecord.copy(
+                                                    title = "分析失败",
+                                                    summary = "分析屏幕时发生异常: ${e.localizedMessage}",
+                                                    tags = "分析失败"
+                                                ))
+                                            }
+                                        } catch (dbEx: Throwable) {
+                                            Log.e(TAG, "Failed to update error status in DB", dbEx)
+                                        }
+                                    }
+                                }
                             }
+                        } catch (e: Throwable) {
+                            Log.e(TAG, "Exception in triggerScreenCapture parent coroutine (Android 11+)", e)
                         }
                     }
                 }
@@ -377,24 +463,48 @@ class AwaAccessibilityService : AccessibilityService() {
             Toast.makeText(this@AwaAccessibilityService, "屏幕文本已捕获，后台整理中...", Toast.LENGTH_SHORT).show()
 
             serviceScope.launch(Dispatchers.Default) {
-                recordInsertJob.join()
-                val finalRecordId = recordId
-                if (finalRecordId == -1L) return@launch
+                try {
+                    recordInsertJob.join()
+                    val finalRecordId = recordId
+                    if (finalRecordId == -1L) return@launch
 
-                launch(Dispatchers.IO) {
-                    if (layoutText.trim().isEmpty()) {
-                        val failedRecord = dao.getCaptureById(finalRecordId)
-                        if (failedRecord != null) {
-                            dao.updateCapture(failedRecord.copy(
-                                id = finalRecordId,
-                                title = "未识别到内容",
-                                summary = "未能从当前屏幕的布局中提取到任何文字。",
-                                tags = "识别失败"
-                            ))
+                    launch(Dispatchers.IO) {
+                        try {
+                            if (layoutText.trim().isEmpty()) {
+                                try {
+                                    val failedRecord = dao.getCaptureById(finalRecordId)
+                                    if (failedRecord != null) {
+                                        dao.updateCapture(failedRecord.copy(
+                                            id = finalRecordId,
+                                            title = "未识别到内容",
+                                            summary = "未能从当前屏幕的布局中提取到任何文字。",
+                                            tags = "识别失败"
+                                        ))
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Failed to update failure state in DB", e)
+                                }
+                                return@launch
+                            }
+                            processAndSaveCapturedContentAsync(dao, finalRecordId, layoutText, null, "SCREENSHOT")
+                        } catch (e: Throwable) {
+                            Log.e(TAG, "Exception in triggerScreenCapture task (legacy SDK)", e)
+                            try {
+                                val failedRecord = dao.getCaptureById(finalRecordId)
+                                if (failedRecord != null) {
+                                    dao.updateCapture(failedRecord.copy(
+                                        title = "分析失败",
+                                        summary = "分析屏幕时发生异常: ${e.localizedMessage}",
+                                        tags = "分析失败"
+                                    ))
+                                }
+                            } catch (dbEx: Throwable) {
+                                Log.e(TAG, "Failed to update error status in DB", dbEx)
+                            }
                         }
-                        return@launch
                     }
-                    processAndSaveCapturedContentAsync(dao, finalRecordId, layoutText, null, "SCREENSHOT")
+                } catch (e: Throwable) {
+                    Log.e(TAG, "Exception in legacy screen capture parent coroutine", e)
                 }
             }
         }
@@ -482,61 +592,73 @@ class AwaAccessibilityService : AccessibilityService() {
         imagePath: String?,
         sourceType: String
     ) {
-        val result = OpenAiCompatibleClient.analyzeText(this@AwaAccessibilityService, rawText)
-        
-        val title: String
-        val summary: String
-        val tags: String
-        
-        if (result != null) {
-            title = result.title
-            summary = result.summary
-            tags = result.tags.joinToString(",")
-        } else {
-            title = "自动分析记录 (${SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date())})"
-            summary = "（AI 分析失败，这是原始文本提取）\n\n$rawText"
-            tags = "屏幕提取"
+        var title = "自动分析记录 (${SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date())})"
+        var summary = "（AI 分析失败，这是原始文本提取）\n\n$rawText"
+        var tags = "分析失败"
+        var result: AnalysisResult? = null
+
+        try {
+            result = OpenAiCompatibleClient.analyzeText(this@AwaAccessibilityService, rawText)
+            if (result != null) {
+                title = result.title
+                summary = result.summary
+                tags = result.tags.joinToString(",")
+            }
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error in processAndSaveCapturedContentAsync calling analyzeText", e)
         }
 
         // 更新 Room 数据库中的现有记录
-        val updatedRecord = CaptureRecord(
-            id = recordId,
-            title = title,
-            summary = summary,
-            rawContent = rawText,
-            imagePath = imagePath,
-            timestamp = System.currentTimeMillis(),
-            tags = tags,
-            sourceType = sourceType
-        )
-        dao.updateCapture(updatedRecord)
+        try {
+            val updatedRecord = CaptureRecord(
+                id = recordId,
+                title = title,
+                summary = summary,
+                rawContent = rawText,
+                imagePath = imagePath,
+                timestamp = System.currentTimeMillis(),
+                tags = tags,
+                sourceType = sourceType
+            )
+            dao.updateCapture(updatedRecord)
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed to update capture record in database", e)
+        }
 
         // 处理生成的智能提醒
         if (result != null && result.reminders.isNotEmpty()) {
-            val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-            for (suggestion in result.reminders) {
-                try {
-                    val parsedTime = sdf.parse(suggestion.timeString)
-                    if (parsedTime != null && parsedTime.time > System.currentTimeMillis()) {
-                        val reminder = ReminderItem(
-                            recordId = recordId,
-                            title = suggestion.title,
-                            reminderTime = parsedTime.time,
-                            isActive = true,
-                            isTriggered = false
-                        )
-                        val reminderId = dao.insertReminder(reminder)
-                        // 注册到系统的 AlarmManager
-                        ReminderScheduler.scheduleReminder(this@AwaAccessibilityService, reminder.copy(id = reminderId))
+            try {
+                val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+                for (suggestion in result.reminders) {
+                    try {
+                        val parsedTime = sdf.parse(suggestion.timeString)
+                        if (parsedTime != null && parsedTime.time > System.currentTimeMillis()) {
+                            val reminder = ReminderItem(
+                                recordId = recordId,
+                                title = suggestion.title,
+                                reminderTime = parsedTime.time,
+                                isActive = true,
+                                isTriggered = false
+                            )
+                            val reminderId = dao.insertReminder(reminder)
+                            // 注册到系统的 AlarmManager
+                            ReminderScheduler.scheduleReminder(this@AwaAccessibilityService, reminder.copy(id = reminderId))
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to parse reminder time: ${suggestion.timeString}", e)
                     }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to parse reminder time: ${suggestion.timeString}", e)
                 }
+            } catch (e: Throwable) {
+                Log.e(TAG, "Error processing reminders in processAndSaveCapturedContentAsync", e)
             }
         }
 
-        withContext(Dispatchers.Main) {
-            Toast.makeText(this@AwaAccessibilityService, "屏幕分析整理完成: $title", Toast.LENGTH_SHORT).show()
+        try {
+            withContext(Dispatchers.Main) {
+                Toast.makeText(this@AwaAccessibilityService, "屏幕分析整理完成: $title", Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed to show completion toast", e)
         }
     }
 }
