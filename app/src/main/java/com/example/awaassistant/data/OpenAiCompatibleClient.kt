@@ -122,6 +122,42 @@ object OpenAiCompatibleClient {
     /**
      * 基于本地检索内容的 RAG 问答
      */
+    private fun getFriendlyDateTime(timestamp: Long): String {
+        val now = System.currentTimeMillis()
+        val diff = now - timestamp
+        val oneDay = 24 * 60 * 60 * 1000L
+        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+        val timePart = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(timestamp))
+        return when {
+            diff < 0 -> sdf.format(Date(timestamp))
+            diff < 5 * 60 * 1000L -> "刚刚"
+            diff < 60 * 60 * 1000L -> "${diff / (60 * 1000L)}分钟前"
+            diff < 24 * 60 * 60 * 1000L -> {
+                val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(now))
+                val recordStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(timestamp))
+                if (todayStr == recordStr) {
+                    "今天 $timePart"
+                } else {
+                    "昨天 $timePart"
+                }
+            }
+            diff < 2 * oneDay -> {
+                val yesterdayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(now - oneDay))
+                val recordStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(timestamp))
+                if (yesterdayStr == recordStr) {
+                    "昨天 $timePart"
+                } else {
+                    "前天 $timePart"
+                }
+            }
+            diff < 3 * oneDay -> "前天 $timePart"
+            else -> sdf.format(Date(timestamp))
+        }
+    }
+
+    /**
+     * 基于本地检索内容的 RAG 问答
+     */
     suspend fun chatWithContext(
         context: Context,
         query: String,
@@ -136,31 +172,52 @@ object OpenAiCompatibleClient {
             return@withContext "请先去设置页面配置您的 API Key。"
         }
 
+        val currentTimeString = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+
         // 构建上下文
         val contextBuilder = StringBuilder()
         if (retrievedRecords.isNotEmpty()) {
-            contextBuilder.append("以下是本地检索到的相关笔记和屏幕截取记录，请优先根据这些内容回答用户的问题：\n\n")
+            contextBuilder.append("<retrieved_context>\n")
+            contextBuilder.append("以下是本地检索到的相关笔记和屏幕截取记录，按照相关度排序（请优先根据这些内容，并结合记录的时间戳回答用户的问题）：\n\n")
             retrievedRecords.forEachIndexed { index, record ->
+                val typeName = when (record.sourceType) {
+                    "SCREENSHOT" -> "屏幕截图"
+                    "PHOTO" -> "手拍笔记"
+                    else -> "纯文本记录"
+                }
+                val timeStr = getFriendlyDateTime(record.timestamp)
                 contextBuilder.append("【文档 ${index + 1}】\n")
+                contextBuilder.append("记录时间: $timeStr\n")
+                contextBuilder.append("记录类型: $typeName\n")
                 contextBuilder.append("标题: ${record.title}\n")
                 contextBuilder.append("摘要: ${record.summary}\n")
                 contextBuilder.append("详细原文: ${record.rawContent}\n")
                 contextBuilder.append("标签: ${record.tags}\n")
                 contextBuilder.append("----------------------\n\n")
             }
+            contextBuilder.append("</retrieved_context>")
         } else {
-            contextBuilder.append("没有在本地检索到相关的笔记记录。你可以使用你自身具备的知识库回答用户，但请明确说明该信息非本地存储记录。\n")
+            contextBuilder.append("<retrieved_context>\n没有在本地检索到相关的笔记或截图记录。\n</retrieved_context>")
         }
 
         val systemPrompt = """
-            你是一个个人智能 AI 助手。你可以帮用户检索、回忆和总结他们记录过的信息。
+            <system_role>
+            你是一个部署在用户手机端的个人智能 AI 助手，名为 Awa。你能够基于用户的屏幕截图和拍下的工作笔记（即下方提供的本地上下文数据）帮用户做回忆和检索。
+            </system_role>
             
-            ${contextBuilder}
+            <current_environment>
+            当前系统时间: $currentTimeString
+            当前活跃页面: 智能对话页
+            </current_environment>
             
-            回答要求：
-            1. 如果问题可以通过上述本地检索记录回答，请严格基于检索记录给出准确且精简的答复。
-            2. 回答中如果引用了某个本地文档，可以提及文档的标题，以便用户了解来源。
-            3. 请使用中文回答。
+            $contextBuilder
+            
+            <generation_rules>
+            1. 事实性约束：有本地文档时优先根据文档回答。如果检索到的文档无法回答该问题，请明确告知用户：“在本地笔记中未检索到相关内容，基于我自身知识推测...”。
+            2. 引用约束：回答必须引用出处。如果你的回答引用了某个本地文档，请在句尾（标点符号前）以 `[Doc X]` 的格式作为文献引用标志（例如：“...根据[Doc 1]所示...”，其中 X 代表文档的序号，如 1 代表文档 1），不要使用任何其他格式的标记，且不要自己捏造不存在的文档序号。
+            3. 语气约束：回答要专业、精炼、富有逻辑，避免啰嗦。
+            4. 语言约束：使用简体中文回答。
+            </generation_rules>
         """.trimIndent()
 
         val messages = JSONArray().apply {

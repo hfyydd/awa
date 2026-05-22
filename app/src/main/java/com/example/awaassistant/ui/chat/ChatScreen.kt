@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -125,9 +126,12 @@ private fun parseMarkdownSegment(segment: String): List<ChatContentBlock> {
 }
 
 /**
- * Formats inline bold text and inline code backticks using SpanStyle
+ * Formats inline bold text, inline code backticks, and [Doc X] reference tags using SpanStyle
  */
-fun buildAnnotatedStringWithInlineStyles(text: String): AnnotatedString {
+fun buildAnnotatedStringWithInlineStyles(
+    text: String,
+    retrievedRecords: List<CaptureRecord> = emptyList()
+): AnnotatedString {
     return buildAnnotatedString {
         var i = 0
         while (i < text.length) {
@@ -160,6 +164,37 @@ fun buildAnnotatedStringWithInlineStyles(text: String): AnnotatedString {
                     } else {
                         append("`")
                         i += 1
+                    }
+                }
+                text.startsWith("[Doc ", i) -> {
+                    val end = text.indexOf("]", i + 5)
+                    if (end != -1) {
+                        val numStr = text.substring(i + 5, end).trim()
+                        val docIndex = numStr.toIntOrNull()?.minus(1)
+                        if (docIndex != null && docIndex >= 0 && docIndex < retrievedRecords.size) {
+                            val record = retrievedRecords[docIndex]
+                            pushStringAnnotation(tag = "DOC_CLICK", annotation = record.id.toString())
+                            pushStyle(
+                                SpanStyle(
+                                    color = Color(0xFF00E676),
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.SansSerif
+                                )
+                            )
+                            append(" 🔗 ${record.title} ")
+                            pop()
+                            pop()
+                            i = end + 1
+                        } else {
+                            // Fallback if index out of bounds or invalid
+                            pushStyle(SpanStyle(color = Color(0xFF00E676), fontWeight = FontWeight.Bold))
+                            append(text.substring(i, end + 1))
+                            pop()
+                            i = end + 1
+                        }
+                    } else {
+                        append("[Doc ")
+                        i += 5
                     }
                 }
                 else -> {
@@ -514,10 +549,19 @@ fun MessageBubble(
                     parsedBlocks.forEach { block ->
                         when (block) {
                             is ChatContentBlock.ThinkBlock -> {
-                                RenderThinkBlock(content = block.content, isFinished = block.isFinished)
+                                RenderThinkBlock(
+                                    content = block.content,
+                                    isFinished = block.isFinished,
+                                    sources = message.sources,
+                                    onNavigateToDetail = onNavigateToDetail
+                                )
                             }
                             is ChatContentBlock.TextBlock -> {
-                                RenderTextBlock(text = block.content)
+                                RenderTextBlock(
+                                    text = block.content,
+                                    sources = message.sources,
+                                    onNavigateToDetail = onNavigateToDetail
+                                )
                             }
                             is ChatContentBlock.CodeBlock -> {
                                 RenderCodeBlock(lang = block.language, code = block.code)
@@ -565,7 +609,12 @@ fun MessageBubble(
  * Text renderer that supports inline formatting and bullet lists
  */
 @Composable
-fun RenderThinkBlock(content: String, isFinished: Boolean) {
+fun RenderThinkBlock(
+    content: String,
+    isFinished: Boolean,
+    sources: List<CaptureRecord> = emptyList(),
+    onNavigateToDetail: (Long) -> Unit = {}
+) {
     var isExpanded by remember(isFinished) { mutableStateOf(!isFinished) }
 
     Card(
@@ -614,7 +663,9 @@ fun RenderThinkBlock(content: String, isFinished: Boolean) {
                         text = content,
                         color = Color(0xFF9E9BAC),
                         fontSize = 12.sp,
-                        lineHeight = 18.sp
+                        lineHeight = 18.sp,
+                        sources = sources,
+                        onNavigateToDetail = onNavigateToDetail
                     )
                 }
             }
@@ -623,14 +674,16 @@ fun RenderThinkBlock(content: String, isFinished: Boolean) {
 }
 
 /**
- * Text renderer that supports inline formatting and bullet lists
+ * Text renderer that supports inline formatting, citation links, and bullet lists
  */
 @Composable
 fun RenderTextBlock(
     text: String,
     color: Color = Color(0xFFE2E0EB),
     fontSize: TextUnit = 14.sp,
-    lineHeight: TextUnit = 20.sp
+    lineHeight: TextUnit = 20.sp,
+    sources: List<CaptureRecord> = emptyList(),
+    onNavigateToDetail: (Long) -> Unit = {}
 ) {
     val lines = text.split("\n")
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -643,19 +696,41 @@ fun RenderTextBlock(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text("•", color = Color(0xFF8E2DE2), fontWeight = FontWeight.Bold, fontSize = fontSize)
-                    Text(
-                        text = buildAnnotatedStringWithInlineStyles(cleanLine),
-                        color = color,
-                        fontSize = fontSize,
-                        lineHeight = lineHeight
+                    val annotatedString = buildAnnotatedStringWithInlineStyles(cleanLine, sources)
+                    ClickableText(
+                        text = annotatedString,
+                        style = LocalTextStyle.current.copy(
+                            color = color,
+                            fontSize = fontSize,
+                            lineHeight = lineHeight
+                        ),
+                        onClick = { offset ->
+                            annotatedString.getStringAnnotations(tag = "DOC_CLICK", start = offset, end = offset)
+                                .firstOrNull()?.let { annotation ->
+                                    annotation.item.toLongOrNull()?.let { docId ->
+                                        onNavigateToDetail(docId)
+                                    }
+                                }
+                        }
                     )
                 }
             } else {
-                Text(
-                    text = buildAnnotatedStringWithInlineStyles(line),
-                    color = color,
-                    fontSize = fontSize,
-                    lineHeight = lineHeight
+                val annotatedString = buildAnnotatedStringWithInlineStyles(line, sources)
+                ClickableText(
+                    text = annotatedString,
+                    style = LocalTextStyle.current.copy(
+                        color = color,
+                        fontSize = fontSize,
+                        lineHeight = lineHeight
+                    ),
+                    onClick = { offset ->
+                        annotatedString.getStringAnnotations(tag = "DOC_CLICK", start = offset, end = offset)
+                            .firstOrNull()?.let { annotation ->
+                                annotation.item.toLongOrNull()?.let { docId ->
+                                    onNavigateToDetail(docId)
+                                }
+                            }
+                    }
                 )
             }
         }
