@@ -318,8 +318,8 @@ fun ChatScreen(
                     ) {
                         OnboardingView(
                             onSelectPreset = { prompt ->
-                                inputText = prompt
                                 viewModel.sendMessage(context, prompt)
+                                inputText = ""
                             }
                         )
                     }
