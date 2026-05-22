@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.TextUnit
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
@@ -50,16 +51,57 @@ import kotlinx.coroutines.launch
 
 // Represents markdown parsed content blocks
 sealed interface ChatContentBlock {
+    data class ThinkBlock(val content: String, val isFinished: Boolean) : ChatContentBlock
     data class CodeBlock(val language: String, val code: String) : ChatContentBlock
     data class TextBlock(val content: String) : ChatContentBlock
 }
 
 /**
- * Fast stateful markdown-like parser to extract fenced code blocks and text blocks
+ * Fast stateful markdown-like parser to extract fenced code blocks, text blocks,
+ * and think blocks.
  */
 fun parseMarkdown(text: String): List<ChatContentBlock> {
     val blocks = mutableListOf<ChatContentBlock>()
-    val parts = text.split("```")
+    val thinkOpenTag = "<think>"
+    val thinkCloseTag = "</think>"
+    var currentIndex = 0
+
+    while (currentIndex < text.length) {
+        val nextOpen = text.indexOf(thinkOpenTag, currentIndex)
+        if (nextOpen == -1) {
+            val rest = text.substring(currentIndex)
+            if (rest.isNotEmpty()) {
+                blocks.addAll(parseMarkdownSegment(rest))
+            }
+            break
+        }
+
+        if (nextOpen > currentIndex) {
+            val before = text.substring(currentIndex, nextOpen)
+            blocks.addAll(parseMarkdownSegment(before))
+        }
+
+        val nextClose = text.indexOf(thinkCloseTag, nextOpen + thinkOpenTag.length)
+        if (nextClose == -1) {
+            val thinkContent = text.substring(nextOpen + thinkOpenTag.length)
+            if (thinkContent.isNotEmpty()) {
+                blocks.add(ChatContentBlock.ThinkBlock(thinkContent, isFinished = false))
+            }
+            break
+        } else {
+            val thinkContent = text.substring(nextOpen + thinkOpenTag.length, nextClose)
+            if (thinkContent.isNotEmpty()) {
+                blocks.add(ChatContentBlock.ThinkBlock(thinkContent, isFinished = true))
+            }
+            currentIndex = nextClose + thinkCloseTag.length
+        }
+    }
+    return blocks
+}
+
+private fun parseMarkdownSegment(segment: String): List<ChatContentBlock> {
+    val blocks = mutableListOf<ChatContentBlock>()
+    val parts = segment.split("```")
     for (i in parts.indices) {
         val part = parts[i]
         if (i % 2 == 1) {
@@ -471,6 +513,9 @@ fun MessageBubble(
                     val parsedBlocks = remember(message.content) { parseMarkdown(message.content) }
                     parsedBlocks.forEach { block ->
                         when (block) {
+                            is ChatContentBlock.ThinkBlock -> {
+                                RenderThinkBlock(content = block.content, isFinished = block.isFinished)
+                            }
                             is ChatContentBlock.TextBlock -> {
                                 RenderTextBlock(text = block.content)
                             }
@@ -520,7 +565,73 @@ fun MessageBubble(
  * Text renderer that supports inline formatting and bullet lists
  */
 @Composable
-fun RenderTextBlock(text: String) {
+fun RenderThinkBlock(content: String, isFinished: Boolean) {
+    var isExpanded by remember(isFinished) { mutableStateOf(!isFinished) }
+
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0x0CFFFFFF)),
+        border = BorderStroke(1.dp, Color(0x12FFFFFF)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { isExpanded = !isExpanded },
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "🧠",
+                        fontSize = 14.sp
+                    )
+                    Text(
+                        text = if (isFinished) "思考过程" else "正在思考...",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isFinished) Color.LightGray else Color(0xFF8E2DE2)
+                    )
+                }
+
+                Text(
+                    text = if (isExpanded) "收起" else "展开",
+                    fontSize = 11.sp,
+                    color = Color(0xFF8E2DE2),
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            AnimatedVisibility(visible = isExpanded) {
+                Column(modifier = Modifier.padding(top = 8.dp)) {
+                    RenderTextBlock(
+                        text = content,
+                        color = Color(0xFF9E9BAC),
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Text renderer that supports inline formatting and bullet lists
+ */
+@Composable
+fun RenderTextBlock(
+    text: String,
+    color: Color = Color(0xFFE2E0EB),
+    fontSize: TextUnit = 14.sp,
+    lineHeight: TextUnit = 20.sp
+) {
     val lines = text.split("\n")
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         lines.forEach { line ->
@@ -531,20 +642,20 @@ fun RenderTextBlock(text: String) {
                     verticalAlignment = Alignment.Top,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text("•", color = Color(0xFF8E2DE2), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text("•", color = Color(0xFF8E2DE2), fontWeight = FontWeight.Bold, fontSize = fontSize)
                     Text(
                         text = buildAnnotatedStringWithInlineStyles(cleanLine),
-                        color = Color(0xFFE2E0EB),
-                        fontSize = 14.sp,
-                        lineHeight = 20.sp
+                        color = color,
+                        fontSize = fontSize,
+                        lineHeight = lineHeight
                     )
                 }
             } else {
                 Text(
                     text = buildAnnotatedStringWithInlineStyles(line),
-                    color = Color(0xFFE2E0EB),
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp
+                    color = color,
+                    fontSize = fontSize,
+                    lineHeight = lineHeight
                 )
             }
         }
