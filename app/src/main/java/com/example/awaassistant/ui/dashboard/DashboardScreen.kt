@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,6 +29,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,6 +60,7 @@ fun DashboardScreen(
     val records by viewModel.captureRecords.collectAsStateWithLifecycle()
     val reminders by viewModel.activeReminders.collectAsStateWithLifecycle()
     val isProcessing by viewModel.isProcessingPhoto.collectAsStateWithLifecycle()
+    val processingType by viewModel.processingType.collectAsStateWithLifecycle()
     val isAccessibilityActive by viewModel.isAccessibilityActive.collectAsStateWithLifecycle()
 
     // 监控悬浮球是否开启的本地状态
@@ -185,7 +188,7 @@ fun DashboardScreen(
                 // 3. 正在处理中的加载状态
                 if (isProcessing) {
                     item {
-                        ProcessingLoaderCard()
+                        ProcessingLoaderCard(processingType = processingType ?: "PHOTO")
                     }
                 }
 
@@ -220,7 +223,8 @@ fun DashboardScreen(
                         CaptureRecordCard(
                             record = record,
                             onClick = { onNavigateToDetail(record.id) },
-                            onDelete = { viewModel.deleteRecord(context, record) }
+                            onDelete = { viewModel.deleteRecord(context, record) },
+                            onToggleComplete = { viewModel.toggleRecordCompletion(context, record) }
                         )
                     }
                 }
@@ -426,10 +430,16 @@ fun ActionCard(
 }
 
 @Composable
-fun ProcessingLoaderCard() {
+fun ProcessingLoaderCard(processingType: String) {
+    val isText = processingType == "TEXT"
+    val cardColor = if (isText) Color(0x228E2DE2) else Color(0x22FFB300)
+    val accentColor = if (isText) Color(0xFFC51162) else Color.Yellow
+    val titleText = if (isText) "正在调用 AI 整理便签..." else "正在 OCR 提取并调用 AI 总结..."
+    val subtitleText = if (isText) "正在通过 AI 智能提炼便签并提取提醒，请勿关闭页面" else "正在通过本地 ML Kit 提取文字并组织语言，请勿关闭页面"
+
     Card(
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0x22FFB300)),
+        colors = CardDefaults.cardColors(containerColor = cardColor),
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -438,19 +448,19 @@ fun ProcessingLoaderCard() {
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             CircularProgressIndicator(
-                color = Color.Yellow,
+                color = accentColor,
                 modifier = Modifier.size(24.dp),
                 strokeWidth = 2.5.dp
             )
             Column {
                 Text(
-                    "正在 OCR 提取并调用 AI 总结...",
+                    titleText,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.Yellow
+                    color = accentColor
                 )
                 Text(
-                    "正在通过本地 ML Kit 提取文字并组织语言，请勿关闭页面",
+                    subtitleText,
                     fontSize = 11.sp,
                     color = Color.LightGray
                 )
@@ -534,11 +544,12 @@ fun RemindersSection(
 fun CaptureRecordCard(
     record: CaptureRecord,
     onClick: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onToggleComplete: () -> Unit
 ) {
     Card(
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0x0CFFFFFF)),
+        colors = CardDefaults.cardColors(containerColor = if (record.isCompleted) Color(0x05FFFFFF) else Color(0x0CFFFFFF)),
         elevation = CardDefaults.cardElevation(0.dp),
         modifier = Modifier
             .fillMaxWidth()
@@ -564,20 +575,31 @@ fun CaptureRecordCard(
                         .background(Color.DarkGray)
                 )
             } else {
-                // 纯文本抓取使用文字图标占位
+                // 纯文本便签/待办使用圆形复选框交互设计
                 Box(
                     modifier = Modifier
                         .size(80.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0x228E2DE2)),
+                        .background(if (record.isCompleted) Color(0x1F00E676) else Color(0x1F8E2DE2))
+                        .clickable { onToggleComplete() },
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        Icons.Default.Description,
-                        contentDescription = null,
-                        tint = Color(0xFF8E2DE2),
-                        modifier = Modifier.size(32.dp)
-                    )
+                    if (record.isCompleted) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = "已完成",
+                            tint = Color(0xFF00E676),
+                            modifier = Modifier.size(32.dp)
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color.Transparent)
+                                .border(2.dp, Color(0xFF8E2DE2), RoundedCornerShape(12.dp))
+                        )
+                    }
                 }
             }
 
@@ -594,9 +616,10 @@ fun CaptureRecordCard(
                         text = record.title,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White,
+                        color = if (record.isCompleted) Color.Gray else Color.White,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        textDecoration = if (record.isCompleted) TextDecoration.LineThrough else TextDecoration.None,
                         modifier = Modifier.weight(1f)
                     )
                     
@@ -618,9 +641,10 @@ fun CaptureRecordCard(
                 Text(
                     text = record.summary.replace(Regex("[#*`\\-]"), "").trim(), // 剥离 Markdown 符号用于预览
                     fontSize = 11.sp,
-                    color = Color.LightGray,
+                    color = if (record.isCompleted) Color.Gray else Color.LightGray,
                     maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    textDecoration = if (record.isCompleted) TextDecoration.LineThrough else TextDecoration.None
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))

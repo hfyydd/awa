@@ -40,6 +40,9 @@ class DashboardViewModel(context: Context) : ViewModel() {
     val activeReminders: StateFlow<List<ReminderItem>> = dao.getActiveRemindersFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    private val _processingType = MutableStateFlow<String?>(null)
+    val processingType: StateFlow<String?> = _processingType.asStateFlow()
+
     private val _isProcessingPhoto = MutableStateFlow(false)
     val isProcessingPhoto: StateFlow<Boolean> = _isProcessingPhoto.asStateFlow()
 
@@ -81,6 +84,7 @@ class DashboardViewModel(context: Context) : ViewModel() {
      */
     fun processPhotoNote(context: Context, photoUri: Uri, imageFile: File) {
         viewModelScope.launch {
+            _processingType.value = "PHOTO"
             _isProcessingPhoto.value = true
             Toast.makeText(context, "开始识别笔记，请稍后...", Toast.LENGTH_SHORT).show()
             try {
@@ -90,6 +94,7 @@ class DashboardViewModel(context: Context) : ViewModel() {
                     withContext(Dispatchers.Main) {
                         Toast.makeText(context, "未能从照片中提取到任何文字，请重试", Toast.LENGTH_LONG).show()
                     }
+                    _processingType.value = null
                     _isProcessingPhoto.value = false
                     return@launch
                 }
@@ -159,6 +164,7 @@ class DashboardViewModel(context: Context) : ViewModel() {
                     Toast.makeText(context, "识别笔记出错: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             } finally {
+                _processingType.value = null
                 _isProcessingPhoto.value = false
             }
         }
@@ -170,6 +176,7 @@ class DashboardViewModel(context: Context) : ViewModel() {
     fun addNewNote(context: Context, noteText: String) {
         viewModelScope.launch {
             if (noteText.trim().isEmpty()) return@launch
+            _processingType.value = "TEXT"
             _isProcessingPhoto.value = true
             Toast.makeText(context, "开始整理便签，请稍后...", Toast.LENGTH_SHORT).show()
             try {
@@ -248,7 +255,28 @@ class DashboardViewModel(context: Context) : ViewModel() {
                     Toast.makeText(context, "整理便签出错: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             } finally {
+                _processingType.value = null
                 _isProcessingPhoto.value = false
+            }
+        }
+    }
+
+    /**
+     * 切换便签/待办记录的完成状态
+     */
+    fun toggleRecordCompletion(context: Context, record: CaptureRecord) {
+        viewModelScope.launch {
+            try {
+                val newStatus = !record.isCompleted
+                val updatedRecord = record.copy(isCompleted = newStatus)
+                dao.updateCapture(updatedRecord)
+                
+                val message = if (newStatus) "便签已完成" else "便签已重置为未完成"
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Log.e("DashboardVM", "Failed to toggle completion status", e)
             }
         }
     }
