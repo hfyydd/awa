@@ -56,7 +56,7 @@ object OpenAiCompatibleClient {
 
             val promptContent = """
                 你是一个个人 AI 助手。请分析以下屏幕文本或拍照笔记内容，并整理成 JSON 格式返回。
-                当前系统时间是: ${'$'}currentTimeString
+                当前系统时间是: $currentTimeString
                 
                 【整理要求】
                 1. 规范语言：如果输入中包含错别字，请予以纠正；理顺句子排版，以易读的 Markdown 列表形式输出在 "summary" 中。所有输出内容必须使用规范的简体中文。
@@ -66,7 +66,7 @@ object OpenAiCompatibleClient {
                 5. 输出格式：直接输出纯 JSON 字符串，严禁包含任何 Markdown 格式包裹（如 ```json 等），保持输出极其简洁以提高处理速度。
                 
                 【输入内容】
-                ${'$'}rawText
+                $rawText
             """.trimIndent()
 
             val messages = JSONArray().apply {
@@ -88,7 +88,7 @@ object OpenAiCompatibleClient {
 
             val request = Request.Builder()
                 .url(requestUrl)
-                .addHeader("Authorization", "Bearer ${'$'}apiKey")
+                .addHeader("Authorization", "Bearer $apiKey")
                 .addHeader("Content-Type", "application/json")
                 .post(requestBody)
                 .build()
@@ -100,7 +100,7 @@ object OpenAiCompatibleClient {
                 }
 
                 val responseBody = response.body?.string() ?: return@withContext null
-                Log.d(TAG, "Response: ${'$'}responseBody")
+                Log.d(TAG, "Response: $responseBody")
 
                 val jsonResponse = JSONObject(responseBody)
                 val choices = jsonResponse.getJSONArray("choices")
