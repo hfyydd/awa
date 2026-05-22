@@ -33,6 +33,10 @@ import coil3.compose.AsyncImage
 import com.example.awaassistant.data.AppDatabase
 import com.example.awaassistant.data.CaptureRecord
 import com.example.awaassistant.data.ReminderItem
+import com.example.awaassistant.util.ReminderScheduler
+import androidx.compose.material.icons.filled.Delete
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -234,11 +238,37 @@ fun NoteDetailScreen(
                                         fontWeight = FontWeight.SemiBold
                                     )
                                 }
-                                Text(
-                                    timeStr,
-                                    fontSize = 11.sp,
-                                    color = Color(0xFF00E676)
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        timeStr,
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF00E676)
+                                    )
+                                    IconButton(
+                                        onClick = {
+                                            scope.launch(Dispatchers.IO) {
+                                                ReminderScheduler.cancelReminder(context, reminder)
+                                                dao.deleteReminder(reminder)
+                                                val updatedList = dao.getRemindersForRecord(recordId)
+                                                withContext(Dispatchers.Main) {
+                                                    reminders = updatedList
+                                                    Toast.makeText(context, "提醒已取消并删除", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Delete,
+                                            contentDescription = "取消提醒",
+                                            tint = Color.LightGray,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
