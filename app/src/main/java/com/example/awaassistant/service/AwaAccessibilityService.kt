@@ -39,9 +39,7 @@ class AwaAccessibilityService : AccessibilityService() {
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    private var lastVolumeDownTime = 0L
-    private var isVolumeDownPressed = false
-    private var isVolumeUpPressed = false
+    private var lastTriggerTime = 0L
     private var screenshotObserver: android.database.ContentObserver? = null
     private val processedScreenshots = mutableMapOf<String, Long>()
 
@@ -92,42 +90,6 @@ class AwaAccessibilityService : AccessibilityService() {
     }
 
     override fun onKeyEvent(event: android.view.KeyEvent?): Boolean {
-        if (event == null) return false
-        
-        if (!com.example.awaassistant.data.SettingsManager.isVolumeShortcutEnabled(this)) {
-            return super.onKeyEvent(event)
-        }
-
-        val keyCode = event.keyCode
-        val action = event.action
-
-        // 1. 组合按键触发 (音量上 + 音量下同时处于按下状态)
-        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) {
-            isVolumeDownPressed = (action == android.view.KeyEvent.ACTION_DOWN)
-        } else if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP) {
-            isVolumeUpPressed = (action == android.view.KeyEvent.ACTION_DOWN)
-        }
-
-        if (isVolumeDownPressed && isVolumeUpPressed) {
-            Log.d(TAG, "Volume Up + Down pressed together, triggering capture")
-            triggerScreenCapture()
-            isVolumeDownPressed = false
-            isVolumeUpPressed = false
-            return true // 拦截音量调整
-        }
-
-        // 2. 双击音量下键触发
-        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN && action == android.view.KeyEvent.ACTION_DOWN) {
-            val currentTime = System.currentTimeMillis()
-            if (currentTime - lastVolumeDownTime < 500) {
-                Log.d(TAG, "Volume Down double press, triggering capture")
-                triggerScreenCapture()
-                lastVolumeDownTime = 0L // 重置
-                return true // 拦截音量调整
-            }
-            lastVolumeDownTime = currentTime
-        }
-
         return super.onKeyEvent(event)
     }
 
@@ -282,6 +244,13 @@ class AwaAccessibilityService : AccessibilityService() {
      * 触发当前屏幕信息的获取与整理
      */
     fun triggerScreenCapture() {
+        val now = System.currentTimeMillis()
+        if (now - lastTriggerTime < 3000) {
+            Log.d(TAG, "Screen capture rate limited")
+            return
+        }
+        lastTriggerTime = now
+
         // 1. 立即抓取屏幕窗口布局文本（必须在主线程/辅助服务线程立即抓取，防止延迟后窗口树变化）
         val rawLayoutText = captureScreenText()
         val layoutText = ChineseConverter.toSimplified(rawLayoutText)

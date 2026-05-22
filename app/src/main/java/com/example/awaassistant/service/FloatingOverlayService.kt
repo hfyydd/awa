@@ -138,7 +138,6 @@ class FloatingOverlayService : Service() {
             private var initialTouchY = 0f
             private val touchSlop = ViewConfiguration.get(this@FloatingOverlayService).scaledTouchSlop
             private var isDragging = false
-            private val pathPoints = mutableListOf<PointF>()
 
             override fun onTouch(v: View, event: MotionEvent): Boolean {
                 when (event.action) {
@@ -148,14 +147,11 @@ class FloatingOverlayService : Service() {
                         initialTouchX = event.rawX
                         initialTouchY = event.rawY
                         isDragging = false
-                        pathPoints.clear()
-                        pathPoints.add(PointF(event.rawX, event.rawY))
                         return true
                     }
                     MotionEvent.ACTION_MOVE -> {
                         val dx = event.rawX - initialTouchX
                         val dy = event.rawY - initialTouchY
-                        pathPoints.add(PointF(event.rawX, event.rawY))
                         
                         if (!isDragging && (Math.abs(dx) > touchSlop || Math.abs(dy) > touchSlop)) {
                             isDragging = true
@@ -169,16 +165,7 @@ class FloatingOverlayService : Service() {
                         return true
                     }
                     MotionEvent.ACTION_UP -> {
-                        pathPoints.add(PointF(event.rawX, event.rawY))
-                        if (checkLGesture(pathPoints)) {
-                            // 识别到 L 手势，复位悬浮球并触发截图
-                            params.x = initialX
-                            params.y = initialY
-                            windowManager.updateViewLayout(container, params)
-                            
-                            Toast.makeText(this@FloatingOverlayService, "识别到 L 手势，开始分析...", Toast.LENGTH_SHORT).show()
-                            onBubbleClicked()
-                        } else if (!isDragging) {
+                        if (!isDragging) {
                             // 轻按事件：触发当前屏幕捕获
                             onBubbleClicked()
                         } else {
@@ -195,64 +182,6 @@ class FloatingOverlayService : Service() {
                         return true
                     }
                 }
-                return false
-            }
-
-            private fun checkLGesture(points: List<PointF>): Boolean {
-                if (points.size < 10) return false
-
-                val p0 = points.first()
-                val pn = points.last()
-
-                // 寻找极值点作为潜在的拐点
-                var maxIndex = 0
-                var maxY = p0.y
-                var minIndex = 0
-                var minY = p0.y
-
-                for (i in points.indices) {
-                    if (points[i].y > maxY) {
-                        maxY = points[i].y
-                        maxIndex = i
-                    }
-                    if (points[i].y < minY) {
-                        minY = points[i].y
-                        minIndex = i
-                    }
-                }
-
-                val density = resources.displayMetrics.density
-                val threshold = 70 * density  // 手势各笔划的最小偏移量 (70dp)
-                val tolerance = 60 * density  // 垂直或水平垂直分量的容差 (60dp)
-
-                // 1. 校验【先下后横】(极值点 maxIndex 为拐点)
-                val pivotDown = points[maxIndex]
-                val downStrokeY = pivotDown.y - p0.y
-                val downStrokeX = Math.abs(pivotDown.x - p0.x)
-                val horizStrokeX1 = Math.abs(pn.x - pivotDown.x)
-                val horizStrokeY1 = Math.abs(pn.y - pivotDown.y)
-
-                if (downStrokeY >= threshold && downStrokeX <= tolerance &&
-                    horizStrokeX1 >= threshold && horizStrokeY1 <= tolerance &&
-                    maxIndex > 2 && maxIndex < points.size - 3) {
-                    Log.d(TAG, "L Gesture Detected: Down then Horizontal")
-                    return true
-                }
-
-                // 2. 校验【先上后横】(极值点 minIndex 为拐点)
-                val pivotUp = points[minIndex]
-                val upStrokeY = p0.y - pivotUp.y
-                val upStrokeX = Math.abs(pivotUp.x - p0.x)
-                val horizStrokeX2 = Math.abs(pn.x - pivotUp.x)
-                val horizStrokeY2 = Math.abs(pn.y - pivotUp.y)
-
-                if (upStrokeY >= threshold && upStrokeX <= tolerance &&
-                    horizStrokeX2 >= threshold && horizStrokeY2 <= tolerance &&
-                    minIndex > 2 && minIndex < points.size - 3) {
-                    Log.d(TAG, "L Gesture Detected: Up then Horizontal")
-                    return true
-                }
-
                 return false
             }
         })
