@@ -196,6 +196,11 @@ fun DashboardScreen(
                     )
                 }
 
+                // P2: 思考足迹热力图
+                item {
+                    ActivityHeatmap()
+                }
+
                 // 2. 快捷行动按钮
                 item {
                     Column(
