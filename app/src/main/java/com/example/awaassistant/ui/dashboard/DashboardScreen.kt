@@ -196,6 +196,14 @@ fun DashboardScreen(
                     )
                 }
 
+                // P1: 时光胶囊卡片
+                item {
+                    MemoryCapsuleCard(
+                        onDismiss = { },
+                        onViewDetail = { }
+                    )
+                }
+
                 // P2: 思考足迹热力图
                 item {
                     ActivityHeatmap()
