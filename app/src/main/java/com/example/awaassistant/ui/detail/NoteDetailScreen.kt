@@ -33,6 +33,7 @@ import coil3.compose.AsyncImage
 import com.example.awaassistant.data.AppDatabase
 import com.example.awaassistant.data.CaptureRecord
 import com.example.awaassistant.data.ReminderItem
+import com.example.awaassistant.data.OpenAiCompatibleClient
 import com.example.awaassistant.util.ReminderScheduler
 import androidx.compose.material.icons.filled.Delete
 import kotlinx.coroutines.Dispatchers
@@ -41,6 +42,18 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import com.example.awaassistant.util.NutrientInfo
+import com.example.awaassistant.util.NutrientParser
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.withStyle
+import androidx.compose.foundation.shape.CircleShape
+import android.util.Log
+import androidx.compose.foundation.BorderStroke
+
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -60,6 +73,7 @@ fun NoteDetailScreen(
     var reminders by remember { mutableStateOf<List<ReminderItem>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var showRawText by remember { mutableStateOf(false) }
+    var isAiAnalyzing by remember { mutableStateOf(false) }
 
     LaunchedEffect(recordId) {
         isLoading = true
@@ -148,6 +162,7 @@ fun NoteDetailScreen(
                         val typeText = when (currentRecord.sourceType) {
                             "SCREENSHOT" -> "来自屏幕截取"
                             "PHOTO" -> "来自手拍笔记"
+                            "CALORIE" -> "来自健康卡路里记录"
                             else -> "纯文字提取"
                         }
                         Text(
@@ -189,22 +204,180 @@ fun NoteDetailScreen(
                     Divider(color = Color(0x11FFFFFF))
 
                     // 3. AI 总结板块
+                    if (currentRecord.sourceType == "CALORIE") {
+                        val nutrientInfo = remember(currentRecord.summary) {
+                            NutrientParser.parseNutrients(currentRecord.summary)
+                        }
+                        if (nutrientInfo != null) {
+                            Text("卡路里与营养素比例", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Card(
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0x0AFFFFFF)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                NutrientPieChart(info = nutrientInfo)
+                            }
+                        }
+                    }
+
                     Text("AI 提炼总结", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0x0AFFFFFF)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp)
+                    if (currentRecord.tags.contains("未分析")) {
+                        Card(
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0x0F8E2DE2)),
+                            border = BorderStroke(
+                                width = 1.dp,
+                                brush = Brush.linearGradient(
+                                    listOf(Color(0x808E2DE2), Color(0x20F0C3FC))
+                                )
+                            ),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(
-                                text = currentRecord.summary,
-                                fontSize = 13.sp,
-                                color = Color.White,
-                                lineHeight = 20.sp
-                            )
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            Brush.radialGradient(
+                                                colors = listOf(Color(0x408E2DE2), Color(0x008E2DE2))
+                                            )
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("✨", fontSize = 24.sp)
+                                }
+
+                                Text(
+                                    text = "快捷便签待整理",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = Color.White
+                                )
+
+                                Text(
+                                    text = "此便签为快速保存的文本。点击下方按钮，将由 AI 提炼要点、生成结构化摘要、识别待办标签，并智能安排提醒日程。",
+                                    fontSize = 12.sp,
+                                    color = Color.LightGray,
+                                    lineHeight = 18.sp,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+
+                                Button(
+                                    onClick = {
+                                        if (!isAiAnalyzing) {
+                                            isAiAnalyzing = true
+                                            scope.launch(Dispatchers.IO) {
+                                                try {
+                                                    val result = OpenAiCompatibleClient.analyzeText(context, currentRecord.rawContent)
+                                                    if (result != null) {
+                                                        val newTagsList = mutableListOf("便签")
+                                                        newTagsList.addAll(result.tags)
+                                                        val cleanTags = newTagsList.distinct().joinToString(",")
+
+                                                        val updatedRecord = currentRecord.copy(
+                                                            title = result.title,
+                                                            summary = result.summary,
+                                                            tags = cleanTags
+                                                        )
+                                                        dao.updateCapture(updatedRecord)
+
+                                                        if (result.reminders.isNotEmpty()) {
+                                                            val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+                                                            for (suggestion in result.reminders) {
+                                                                try {
+                                                                    val parsedTime = sdf.parse(suggestion.timeString)
+                                                                    if (parsedTime != null && parsedTime.time > System.currentTimeMillis()) {
+                                                                        val reminder = ReminderItem(
+                                                                            recordId = currentRecord.id,
+                                                                            title = suggestion.title,
+                                                                            reminderTime = parsedTime.time,
+                                                                            isActive = true,
+                                                                            isTriggered = false
+                                                                        )
+                                                                        val reminderId = dao.insertReminder(reminder)
+                                                                        ReminderScheduler.scheduleReminder(context, reminder.copy(id = reminderId))
+                                                                    }
+                                                                } catch (e: Exception) {
+                                                                    Log.e("NoteDetailScreen", "Failed to parse reminder: ${suggestion.timeString}", e)
+                                                                }
+                                                            }
+                                                        }
+
+                                                        val updatedReminders = dao.getRemindersForRecord(currentRecord.id)
+                                                        withContext(Dispatchers.Main) {
+                                                            record = updatedRecord
+                                                            reminders = updatedReminders
+                                                            isAiAnalyzing = false
+                                                            Toast.makeText(context, "AI 整理成功！", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    } else {
+                                                        withContext(Dispatchers.Main) {
+                                                            isAiAnalyzing = false
+                                                            Toast.makeText(context, "AI 分析失败，请检查网络设置或稍后重试", Toast.LENGTH_LONG).show()
+                                                        }
+                                                    }
+                                                } catch (e: Exception) {
+                                                    Log.e("NoteDetailScreen", "AI analysis error", e)
+                                                    withContext(Dispatchers.Main) {
+                                                        isAiAnalyzing = false
+                                                        Toast.makeText(context, "出错: ${e.message}", Toast.LENGTH_LONG).show()
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    enabled = !isAiAnalyzing,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color.Transparent,
+                                        contentColor = Color.White
+                                    ),
+                                    contentPadding = PaddingValues(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(48.dp)
+                                        .clip(RoundedCornerShape(24.dp))
+                                        .background(
+                                            Brush.horizontalGradient(
+                                                colors = listOf(Color(0xFF8E2DE2), Color(0xFF4A00E0))
+                                            )
+                                        )
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        if (isAiAnalyzing) {
+                                            CircularProgressIndicator(
+                                                color = Color.White,
+                                                modifier = Modifier.size(18.dp),
+                                                strokeWidth = 2.dp
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("AI 正在深度分析中...", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                        } else {
+                                            Text("✨ 开始 AI 智能整理", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        Card(
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0x0AFFFFFF)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp)
+                            ) {
+                                FormattedSummary(summary = currentRecord.summary)
+                            }
                         }
                     }
 
@@ -333,6 +506,506 @@ fun NoteDetailScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun NutrientPieChart(
+    info: NutrientInfo,
+    modifier: Modifier = Modifier
+) {
+    val total = info.protein + info.fat + info.carbs
+    val proteinProportion = if (total > 0f) info.protein / total else 0f
+    val fatProportion = if (total > 0f) info.fat / total else 0f
+    val carbsProportion = if (total > 0f) info.carbs / total else 0f
+
+    val proteinAngle = proteinProportion * 360f
+    val fatAngle = fatProportion * 360f
+    val carbsAngle = carbsProportion * 360f
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(24.dp)
+    ) {
+        // Left side: Donut Chart
+        Box(
+            modifier = Modifier.size(120.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val strokeWidth = 10.dp.toPx()
+                val sizeMin = size.minDimension
+                val radius = (sizeMin - strokeWidth) / 2
+                val center = this.center
+
+                var startAngle = -90f // Start from top
+
+                if (total == 0f) {
+                    drawCircle(
+                        color = Color(0x1AFFFFFF),
+                        radius = radius,
+                        center = center,
+                        style = Stroke(width = strokeWidth)
+                    )
+                } else {
+                    // Draw base track first
+                    drawCircle(
+                        color = Color(0x0DFFFFFF),
+                        radius = radius,
+                        center = center,
+                        style = Stroke(width = strokeWidth)
+                    )
+
+                    // Draw Protein (Green)
+                    if (proteinAngle > 0f) {
+                        drawArc(
+                            color = Color(0xFF00E676),
+                            startAngle = startAngle,
+                            sweepAngle = proteinAngle,
+                            useCenter = false,
+                            style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                        )
+                        startAngle += proteinAngle
+                    }
+
+                    // Draw Fat (Yellow/Orange)
+                    if (fatAngle > 0f) {
+                        drawArc(
+                            color = Color(0xFFFFB300),
+                            startAngle = startAngle,
+                            sweepAngle = fatAngle,
+                            useCenter = false,
+                            style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                        )
+                        startAngle += fatAngle
+                    }
+
+                    // Draw Carbs (Purple)
+                    if (carbsAngle > 0f) {
+                        drawArc(
+                            color = Color(0xFF8E2DE2),
+                            startAngle = startAngle,
+                            sweepAngle = carbsAngle,
+                            useCenter = false,
+                            style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                        )
+                    }
+                }
+            }
+
+            // Central text in the Donut hole
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = "${info.calories}",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                Text(
+                    text = "千卡(kcal)",
+                    fontSize = 10.sp,
+                    color = Color.Gray
+                )
+            }
+        }
+
+        // Right side: legends with progress indicators and percentages
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            NutrientLegendItem(
+                label = "蛋白质",
+                amount = "${info.protein}g",
+                proportion = proteinProportion,
+                color = Color(0xFF00E676)
+            )
+            NutrientLegendItem(
+                label = "脂肪",
+                amount = "${info.fat}g",
+                proportion = fatProportion,
+                color = Color(0xFFFFB300)
+            )
+            NutrientLegendItem(
+                label = "碳水",
+                amount = "${info.carbs}g",
+                proportion = carbsProportion,
+                color = Color(0xFF8E2DE2)
+            )
+        }
+    }
+}
+
+@Composable
+fun NutrientLegendItem(
+    label: String,
+    amount: String,
+    proportion: Float,
+    color: Color
+) {
+    val percentage = (proportion * 100).toInt()
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(color)
+                )
+                Text(
+                    text = label,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.LightGray
+                )
+            }
+            Text(
+                text = "$amount ($percentage%)",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        // Custom progress bar using Row background
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(Color(0x1AFFFFFF))
+        ) {
+            if (proportion > 0f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(fraction = proportion)
+                        .fillMaxHeight()
+                        .background(color)
+                )
+            }
+        }
+    }
+}
+
+data class IngredientItem(
+    val emoji: String,
+    val name: String,
+    val weight: String,
+    val calories: String
+)
+
+fun parseIngredientLine(line: String): IngredientItem? {
+    try {
+        var cleanLine = line.trim()
+        if (cleanLine.startsWith("-") || cleanLine.startsWith("*") || cleanLine.startsWith("•")) {
+            cleanLine = cleanLine.substring(1).trim()
+        }
+        cleanLine = cleanLine.replace(Regex("^\\d+\\s*[\\.\\、]\\s*"), "").trim()
+        
+        if (cleanLine.isEmpty()) return null
+        
+        var emoji = "🍳"
+        var namePart = cleanLine
+        
+        // 匹配开头是不是 Emoji 字符
+        val emojiRegex = Regex("^([\\uD83C-\\uDBFF\\uDC00-\\uDFFF\\u2600-\\u27BF\\u2300-\\u23FF\\u2B50\\u2934\\u2B06])")
+        val emojiMatch = emojiRegex.find(cleanLine)
+        if (emojiMatch != null) {
+            emoji = emojiMatch.groupValues[1]
+            namePart = cleanLine.substring(emoji.length).trim()
+        } else {
+            val firstCodePoint = if (cleanLine.isNotEmpty()) cleanLine.codePointAt(0) else 0
+            if (firstCodePoint >= 0x1F300 && firstCodePoint <= 0x1F9FF || firstCodePoint >= 0x2600 && firstCodePoint <= 0x27BF) {
+                val emojiCharCount = Character.charCount(firstCodePoint)
+                emoji = cleanLine.substring(0, emojiCharCount)
+                namePart = cleanLine.substring(emojiCharCount).trim()
+            }
+        }
+        
+        // 提取卡路里部分。支持匹配如 "： 150 kcal", ":150千卡", " - 150 kcal", " 150kcal", " 150"
+        val calorieRegex = Regex("[:：\\-\\s]+(\\d+(?:\\.\\d+)?)\\s*(?:kcal|千卡|卡路里|卡)?\\s*$")
+        val calorieMatch = calorieRegex.find(namePart)
+        var calories = "0"
+        if (calorieMatch != null) {
+            calories = calorieMatch.groupValues[1]
+            namePart = namePart.substring(0, calorieMatch.range.first).trim()
+        } else {
+            val simpleCalorieRegex = Regex("(\\d+(?:\\.\\d+)?)\\s*(?:kcal|千卡|卡路里|卡)?\\s*$")
+            val simpleCalorieMatch = simpleCalorieRegex.find(namePart)
+            if (simpleCalorieMatch != null) {
+                calories = simpleCalorieMatch.groupValues[1]
+                namePart = namePart.substring(0, simpleCalorieMatch.range.first).trim()
+            }
+        }
+        
+        // 提取分量部分
+        val weightRegex = Regex("[\\(（]([^\\)）]+)[\\)）]")
+        val weightMatch = weightRegex.find(namePart)
+        var weight = ""
+        if (weightMatch != null) {
+            weight = weightMatch.groupValues[1].trim()
+            namePart = namePart.replace(weightMatch.value, "").trim()
+        } else {
+            val weightSuffixRegex = Regex("(约?\\d+(?:\\.\\d+)?\\s*(?:g|ml|克|毫升|个|片|碗|盘|杯|根|只|条|瓣))\\s*$")
+            val weightSuffixMatch = weightSuffixRegex.find(namePart)
+            if (weightSuffixMatch != null) {
+                weight = weightSuffixMatch.groupValues[1].trim()
+                namePart = namePart.substring(0, weightSuffixMatch.range.first).trim()
+            }
+        }
+        
+        var name = namePart.replace(Regex("^[:：\\-\\s]+"), "").replace(Regex("[:：\\-\\s]+$"), "").trim()
+        if (name.isEmpty()) {
+            name = "未知食材"
+        }
+        
+        if (weight.isEmpty()) {
+            weight = "适量"
+        }
+        
+        return IngredientItem(emoji = emoji, name = name, weight = weight, calories = calories)
+    } catch (e: Exception) {
+        e.printStackTrace()
+        return null
+    }
+}
+
+@Composable
+fun IngredientRow(
+    item: IngredientItem,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0x0CFFFFFF))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(Color(0x1F8E2DE2)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = item.emoji,
+                fontSize = 18.sp
+            )
+        }
+        
+        Spacer(modifier = Modifier.width(12.dp))
+        
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = item.name,
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                lineHeight = 18.sp
+            )
+            if (item.weight.isNotEmpty()) {
+                Text(
+                    text = if (item.weight.startsWith("约")) item.weight else "分量: ${item.weight}",
+                    color = Color.Gray,
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp
+                )
+            }
+        }
+        
+        Spacer(modifier = Modifier.width(8.dp))
+        
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(100.dp))
+                .background(Color(0x1A8E2DE2))
+                .padding(horizontal = 10.dp, vertical = 4.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "${item.calories} kcal",
+                color = Color(0xFFE0C3FC),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+fun FormattedSummary(summary: String, modifier: Modifier = Modifier) {
+    Column(modifier = modifier) {
+        val cleanSummary = summary
+            .replace("\\\\n", "\n")
+            .replace("\\n", "\n")
+            .replace("\r", "")
+        
+        val lines = cleanSummary.split("\n")
+        var isFirstTitle = true
+        var currentSection = ""
+        
+        lines.forEachIndexed { index, rawLine ->
+            val line = rawLine.trim()
+            if (line.isEmpty()) return@forEachIndexed
+            
+            val isTitle = (line.startsWith("【") && line.contains("】")) ||
+                    line.contains("识别出的食物") || 
+                    line.contains("卡路里/营养成分估算") || 
+                    line.contains("健康点评与建议") ||
+                    line.contains("食材明细估算") ||
+                    (line.startsWith("**") && line.endsWith("**") && line.length < 24) ||
+                    (line.startsWith("###") && line.length < 32)
+            
+            when {
+                isTitle -> {
+                    val titleText = line
+                        .replace("【", "")
+                        .replace("】", "")
+                        .replace("**", "")
+                        .replace("###", "")
+                        .replace(":", "")
+                        .replace("：", "")
+                        .trim()
+                        
+                    currentSection = when {
+                        titleText.contains("食材") || titleText.contains("明细") -> "INGREDIENTS"
+                        titleText.contains("识别") || titleText.contains("食物") || titleText.contains("菜") -> "RECOGNITION"
+                        titleText.contains("估算") || titleText.contains("卡路里") || titleText.contains("成分") -> "CALORIE"
+                        titleText.contains("点评") || titleText.contains("建议") || titleText.contains("健康") -> "ADVICE"
+                        else -> "OTHER"
+                    }
+                    
+                    val icon = when {
+                        currentSection == "INGREDIENTS" -> "🥗"
+                        titleText.contains("识别") || titleText.contains("食物") || titleText.contains("菜") -> "🔍"
+                        titleText.contains("估算") || titleText.contains("卡路里") || titleText.contains("成分") -> "📊"
+                        titleText.contains("点评") || titleText.contains("建议") || titleText.contains("健康") -> "💡"
+                        else -> "✨"
+                    }
+                    
+                    if (!isFirstTitle) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                    }
+                    isFirstTitle = false
+                    
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "$icon $titleText",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFE0C3FC)
+                            )
+                        }
+                        Divider(
+                            color = Color(0x1FFFFFFF),
+                            thickness = 1.dp,
+                            modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
+                        )
+                    }
+                }
+                
+                line.startsWith("-") || line.startsWith("*") || line.startsWith("•") || line.matches(Regex("^\\d+\\..*$")) -> {
+                    if (currentSection == "INGREDIENTS") {
+                        val parsed = parseIngredientLine(line)
+                        if (parsed != null) {
+                            IngredientRow(item = parsed)
+                        } else {
+                            StandardBulletRow(line = line)
+                        }
+                    } else {
+                        StandardBulletRow(line = line)
+                    }
+                }
+                
+                else -> {
+                    Text(
+                        text = parseMarkdownStyle(line),
+                        fontSize = 13.sp,
+                        color = Color(0xFFE0E0E0),
+                        lineHeight = 20.sp,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun StandardBulletRow(line: String) {
+    val content = if (line.matches(Regex("^\\d+\\..*$"))) {
+        line.trim()
+    } else {
+        line.substring(1).trim()
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 4.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(top = 7.dp, end = 8.dp)
+                .size(5.dp)
+                .background(Color(0xFFB388FF), CircleShape)
+        )
+        Text(
+            text = parseMarkdownStyle(content),
+            fontSize = 13.sp,
+            color = Color(0xFFE0E0E0),
+            lineHeight = 20.sp,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+fun parseMarkdownStyle(text: String): AnnotatedString {
+    return buildAnnotatedString {
+        var cursor = 0
+        while (cursor < text.length) {
+            val boldStart = text.indexOf("**", cursor)
+            if (boldStart != -1) {
+                val boldEnd = text.indexOf("**", boldStart + 2)
+                if (boldEnd != -1) {
+                    append(text.substring(cursor, boldStart))
+                    withStyle(style = SpanStyle(fontWeight = FontWeight.Bold, color = Color.White)) {
+                        append(text.substring(boldStart + 2, boldEnd))
+                    }
+                    cursor = boldEnd + 2
+                } else {
+                    append(text.substring(cursor))
+                    break
+                }
+            } else {
+                append(text.substring(cursor))
+                break
             }
         }
     }

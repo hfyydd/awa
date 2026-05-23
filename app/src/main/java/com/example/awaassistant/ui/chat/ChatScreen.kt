@@ -864,8 +864,14 @@ fun SourceChip(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                val typeText = when (record.sourceType) {
+                    "SCREENSHOT" -> "屏幕截图"
+                    "PHOTO" -> "手拍笔记"
+                    "CALORIE" -> "卡路里记录"
+                    else -> "纯文本记录"
+                }
                 Text(
-                    text = if (record.sourceType == "SCREENSHOT") "屏幕截图" else "手拍笔记",
+                    text = typeText,
                     fontSize = 9.sp,
                     color = Color.LightGray
                 )

@@ -101,5 +101,8 @@ dependencies {
 
   // Coil 3 for Compose image loading
   implementation(libs.coil.compose)
+
+  // Local AAR for sherpa-onnx
+  implementation(files("libs/sherpa-onnx-1.13.2.aar"))
 }
 

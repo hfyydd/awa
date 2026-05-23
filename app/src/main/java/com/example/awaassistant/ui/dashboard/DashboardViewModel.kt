@@ -171,29 +171,23 @@ class DashboardViewModel(context: Context) : ViewModel() {
     }
 
     /**
-     * 添加新的文本便签/待办并进行 AI 分析
+     * 处理拍摄的食物卡路里照片
      */
-    fun addNewNote(context: Context, noteText: String) {
+    fun processCaloriePhoto(context: Context, photoUri: Uri, imageFile: File) {
         viewModelScope.launch {
-            if (noteText.trim().isEmpty()) return@launch
-            _processingType.value = "TEXT"
+            _processingType.value = "CALORIE"
             _isProcessingPhoto.value = true
-            Toast.makeText(context, "开始整理便签，请稍后...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "开始识别食物并估算卡路里，请稍后...", Toast.LENGTH_SHORT).show()
             try {
-                // 1. 预先插入一条记录，让用户能立刻看到“处理中”状态的便签
-                val initialRecord = CaptureRecord(
-                    title = "便签整理中...",
-                    summary = "（AI 正在处理便签...）\n\n$noteText",
-                    rawContent = noteText,
-                    imagePath = null,
-                    timestamp = System.currentTimeMillis(),
-                    tags = "便签,处理中",
-                    sourceType = "TEXT"
-                )
-                val recordId = dao.insertCapture(initialRecord)
+                // 1. 本地 OCR 提取中英文文字作为辅助/降级文本
+                val ocrText = try {
+                    LocalOcrHelper.recognizeText(context, photoUri)
+                } catch (e: Exception) {
+                    ""
+                }
 
-                // 2. 后台调用 AI 进行分析
-                val result = OpenAiCompatibleClient.analyzeText(context, noteText)
+                // 2. 调用大模型分析卡路里 (支持多模态 Vision 和 OCR 降级)
+                val result = OpenAiCompatibleClient.analyzeCalorieImage(context, imageFile, ocrText)
 
                 val title: String
                 val summary: String
@@ -204,59 +198,145 @@ class DashboardViewModel(context: Context) : ViewModel() {
                     summary = result.summary
                     tags = result.tags.joinToString(",")
                 } else {
-                    title = "便签 (${SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date())})"
-                    summary = "（AI 分析失败，展示原始文字）\n\n$noteText"
-                    tags = "便签"
+                    title = "卡路里记录 (${SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date())})"
+                    summary = "（AI 分析失败，无法估算卡路里。请检查网络配置或尝试使用支持 Vision 的大模型）" + if (ocrText.isNotEmpty()) "\n\n提取到的文字信息：\n$ocrText" else ""
+                    tags = "健康记录,卡路里"
                 }
 
-                // 3. 更新数据库记录
-                val updatedRecord = CaptureRecord(
-                    id = recordId,
+                // 3. 将拍摄临时文件移动到永久存储目录
+                val permanentFile = saveImageToPermanentStorage(context, imageFile)
+                
+                val record = CaptureRecord(
                     title = title,
                     summary = summary,
-                    rawContent = noteText,
-                    imagePath = null,
+                    rawContent = ocrText.ifEmpty { "食物图片" },
+                    imagePath = permanentFile.absolutePath,
                     timestamp = System.currentTimeMillis(),
                     tags = tags,
-                    sourceType = "TEXT"
+                    sourceType = "CALORIE"
                 )
-                dao.updateCapture(updatedRecord)
 
-                // 4. 解析并注册闹钟
-                if (result != null && result.reminders.isNotEmpty()) {
-                    val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-                    for (suggestion in result.reminders) {
-                        try {
-                            val parsedTime = sdf.parse(suggestion.timeString)
-                            if (parsedTime != null && parsedTime.time > System.currentTimeMillis()) {
-                                val reminder = ReminderItem(
-                                    recordId = recordId,
-                                    title = suggestion.title,
-                                    reminderTime = parsedTime.time,
-                                    isActive = true,
-                                    isTriggered = false
-                                )
-                                val reminderId = dao.insertReminder(reminder)
-                                ReminderScheduler.scheduleReminder(context, reminder.copy(id = reminderId))
-                            }
-                        } catch (e: Exception) {
-                            Log.e("DashboardVM", "Failed to parse note reminder: ${suggestion.timeString}", e)
-                        }
-                    }
-                }
+                // 4. 插入数据库
+                dao.insertCapture(record)
 
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "便签整理成功: $title", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "卡路里分析成功: $title", Toast.LENGTH_LONG).show()
                 }
 
             } catch (e: Exception) {
-                Log.e("DashboardVM", "Error processing note", e)
+                Log.e("DashboardVM", "Error processing calorie photo", e)
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "整理便签出错: ${e.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "估算卡路里出错: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             } finally {
                 _processingType.value = null
                 _isProcessingPhoto.value = false
+            }
+        }
+    }
+
+    /**
+     * 从相册选择并处理卡路里照片
+     */
+    fun processCalorieGalleryPhoto(context: Context, photoUri: Uri) {
+        viewModelScope.launch {
+            _processingType.value = "CALORIE"
+            _isProcessingPhoto.value = true
+            Toast.makeText(context, "正在读取相册图片，请稍后...", Toast.LENGTH_SHORT).show()
+            try {
+                // 1. 将相册图片拷贝到临时文件或者直接保存到永久存储
+                val tempFile = File(context.cacheDir, "gallery_temp_${System.currentTimeMillis()}.jpg")
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(photoUri)?.use { inputStream ->
+                        tempFile.outputStream().use { outputStream ->
+                            inputStream.copyTo(outputStream)
+                        }
+                    }
+                }
+
+                // 2. 本地 OCR
+                val ocrText = try {
+                    LocalOcrHelper.recognizeText(context, photoUri)
+                } catch (e: Exception) {
+                    ""
+                }
+
+                // 3. AI 分析
+                val result = OpenAiCompatibleClient.analyzeCalorieImage(context, tempFile, ocrText)
+
+                val title: String
+                val summary: String
+                val tags: String
+
+                if (result != null) {
+                    title = result.title
+                    summary = result.summary
+                    tags = result.tags.joinToString(",")
+                } else {
+                    title = "卡路里记录 (${SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date())})"
+                    summary = "（AI 分析失败，无法估算卡路里。请检查网络配置或尝试使用支持 Vision 的大模型）" + if (ocrText.isNotEmpty()) "\n\n提取到的文字信息：\n$ocrText" else ""
+                    tags = "健康记录,卡路里"
+                }
+
+                // 4. 将临时文件移入永久存储
+                val permanentFile = saveImageToPermanentStorage(context, tempFile)
+
+                val record = CaptureRecord(
+                    title = title,
+                    summary = summary,
+                    rawContent = ocrText.ifEmpty { "食物图片" },
+                    imagePath = permanentFile.absolutePath,
+                    timestamp = System.currentTimeMillis(),
+                    tags = tags,
+                    sourceType = "CALORIE"
+                )
+
+                dao.insertCapture(record)
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "卡路里分析成功: $title", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                Log.e("DashboardVM", "Error processing gallery calorie photo", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "处理相册图片出错: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            } finally {
+                _processingType.value = null
+                _isProcessingPhoto.value = false
+            }
+        }
+    }
+
+    /**
+     * 添加新的文本便签并保存至数据库
+     */
+    fun addNewNote(context: Context, noteText: String) {
+        viewModelScope.launch {
+            if (noteText.trim().isEmpty()) return@launch
+            try {
+                // 提取首行作为便签的默认标题（最多15个字）
+                val firstLine = noteText.trim().split("\n").firstOrNull() ?: ""
+                val cleanTitle = if (firstLine.length > 15) firstLine.take(15) + "..." else firstLine.ifEmpty { "快捷便签" }
+
+                val newRecord = CaptureRecord(
+                    title = cleanTitle,
+                    summary = noteText,
+                    rawContent = noteText,
+                    imagePath = null,
+                    timestamp = System.currentTimeMillis(),
+                    tags = "便签,未分析",
+                    sourceType = "TEXT"
+                )
+                dao.insertCapture(newRecord)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "便签已保存", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Log.e("DashboardVM", "Error saving note", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "保存便签失败: ${e.message}", Toast.LENGTH_LONG).show()
+                }
             }
         }
     }

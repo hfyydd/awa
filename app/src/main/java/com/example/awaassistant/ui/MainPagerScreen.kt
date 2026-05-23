@@ -34,10 +34,14 @@ fun MainPagerScreen(
     modifier: Modifier = Modifier
 ) {
     val coroutineScope = rememberCoroutineScope()
-    val pagerState = rememberPagerState(pageCount = { 2 })
+    val context = LocalContext.current
+    val initialPage = remember {
+        com.example.awaassistant.data.SettingsManager.getDefaultHomepage(context)
+    }
+    val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { 2 })
     
     // Shared ChatViewModel to trigger clear history in the header
-    val chatViewModel: ChatViewModel = viewModel(factory = ChatViewModel.Factory(LocalContext.current))
+    val chatViewModel: ChatViewModel = viewModel(factory = ChatViewModel.Factory(context))
 
     Scaffold(
         topBar = {

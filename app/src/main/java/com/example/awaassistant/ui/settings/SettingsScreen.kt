@@ -51,13 +51,25 @@ fun SettingsScreen(
     var apiKey by remember { mutableStateOf(SettingsManager.getApiKey(context)) }
     var baseUrl by remember { mutableStateOf(SettingsManager.getBaseUrl(context)) }
     var modelName by remember { mutableStateOf(SettingsManager.getModelName(context)) }
+    var defaultHomepage by remember { mutableStateOf(SettingsManager.getDefaultHomepageString(context)) }
 
     var isApiKeyVisible by remember { mutableStateOf(false) }
+
+    // 多模态独立配置状态
+    var isDedicatedVisionEnabled by remember { mutableStateOf(SettingsManager.isDedicatedVisionEnabled(context)) }
+    var visionApiKey by remember { mutableStateOf(SettingsManager.getVisionApiKey(context)) }
+    var visionBaseUrl by remember { mutableStateOf(SettingsManager.getVisionBaseUrl(context)) }
+    var visionModelName by remember { mutableStateOf(SettingsManager.getVisionModelName(context)) }
+    var isVisionApiKeyVisible by remember { mutableStateOf(false) }
 
     // 测试连接的状态变量
     var isTesting by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<String?>(null) }
     var isTestSuccess by remember { mutableStateOf(false) }
+
+    var isVisionTesting by remember { mutableStateOf(false) }
+    var visionTestResult by remember { mutableStateOf<String?>(null) }
+    var isVisionTestSuccess by remember { mutableStateOf(false) }
 
     // 辅助功能与悬浮球权限状态
     var isAccessibilityActive by remember { mutableStateOf(AwaAccessibilityService.isServiceRunning) }
@@ -127,6 +139,11 @@ fun SettingsScreen(
                             SettingsManager.setApiKey(context, apiKey.trim())
                             SettingsManager.setBaseUrl(context, baseUrl.trim())
                             SettingsManager.setModelName(context, modelName.trim())
+                            SettingsManager.setDedicatedVisionEnabled(context, isDedicatedVisionEnabled)
+                            SettingsManager.setVisionApiKey(context, visionApiKey.trim())
+                            SettingsManager.setVisionBaseUrl(context, visionBaseUrl.trim())
+                            SettingsManager.setVisionModelName(context, visionModelName.trim())
+                            SettingsManager.setDefaultHomepage(context, defaultHomepage)
                             Toast.makeText(context, "配置已保存", Toast.LENGTH_SHORT).show()
                             onBack()
                         }
@@ -324,6 +341,249 @@ fun SettingsScreen(
                                     else Color.Red,
                             modifier = Modifier.padding(12.dp)
                         )
+                    }
+                }
+            }
+
+            Divider(color = Color(0x11FFFFFF))
+
+            // 2.5 独立多模态大模型配置
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "多模态（Vision）大模型独立配置",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Text(
+                        "专门用于卡路里识别与拍照笔记等图片分析任务。若关闭则默认使用上方主配置。",
+                        fontSize = 11.sp,
+                        color = Color.Gray,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+                Switch(
+                    checked = isDedicatedVisionEnabled,
+                    onCheckedChange = { isDedicatedVisionEnabled = it },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color(0xFF8E2DE2),
+                        checkedTrackColor = Color(0x448E2DE2)
+                    )
+                )
+            }
+
+            if (isDedicatedVisionEnabled) {
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0x0AFFFFFF)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            "多模态服务商预设",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.LightGray
+                        )
+
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                PresetButton("智谱 4V-Flash (免费推荐)", modifier = Modifier.weight(1f)) {
+                                    visionBaseUrl = "https://open.bigmodel.cn/api/paas/v4"
+                                    visionModelName = "glm-4v-flash"
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        // Vision Base URL 输入
+                        OutlinedTextField(
+                            value = visionBaseUrl,
+                            onValueChange = { visionBaseUrl = it },
+                            label = { Text("多模态 Base URL (API 地址)", color = Color.Gray) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF8E2DE2),
+                                unfocusedBorderColor = Color(0x33FFFFFF),
+                                focusedLabelColor = Color(0xFF8E2DE2),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            )
+                        )
+
+                        // Vision API Key 输入
+                        OutlinedTextField(
+                            value = visionApiKey,
+                            onValueChange = { visionApiKey = it },
+                            label = { Text("多模态 API Key (密钥)", color = Color.Gray) },
+                            singleLine = true,
+                            visualTransformation = if (isVisionApiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { isVisionApiKeyVisible = !isVisionApiKeyVisible }) {
+                                    Icon(
+                                        imageVector = if (isVisionApiKeyVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                        contentDescription = if (isVisionApiKeyVisible) "隐藏密码" else "显示密码",
+                                        tint = Color.Gray
+                                    )
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF8E2DE2),
+                                unfocusedBorderColor = Color(0x33FFFFFF),
+                                focusedLabelColor = Color(0xFF8E2DE2),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            )
+                        )
+
+                        // Vision Model Name 输入
+                        OutlinedTextField(
+                            value = visionModelName,
+                            onValueChange = { visionModelName = it },
+                            label = { Text("多模态 Model Name (模型名称)", color = Color.Gray) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF8E2DE2),
+                                unfocusedBorderColor = Color(0x33FFFFFF),
+                                focusedLabelColor = Color(0xFF8E2DE2),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            )
+                        )
+
+                        // 测试多模态模型连接按钮
+                        Button(
+                            onClick = {
+                                isVisionTesting = true
+                                visionTestResult = "正在测试与多模态大模型的连接，请稍候..."
+                                isVisionTestSuccess = false
+                                coroutineScope.launch {
+                                    val (success, result) = com.example.awaassistant.data.OpenAiCompatibleClient.testConnection(
+                                        baseUrl = visionBaseUrl.trim(),
+                                        apiKey = visionApiKey.trim(),
+                                        model = visionModelName.trim()
+                                    )
+                                    isVisionTesting = false
+                                    isVisionTestSuccess = success
+                                    visionTestResult = if (success) "连接测试成功！模型回复: \"$result\"" else "连接测试失败: $result"
+                                }
+                            },
+                            enabled = !isVisionTesting && visionApiKey.isNotEmpty() && visionBaseUrl.isNotEmpty() && visionModelName.isNotEmpty(),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0x228E2DE2),
+                                contentColor = Color(0xFFE0C3FC),
+                                disabledContainerColor = Color(0x11FFFFFF),
+                                disabledContentColor = Color.Gray
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            if (isVisionTesting) {
+                                CircularProgressIndicator(
+                                    color = Color(0xFF8E2DE2),
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                            }
+                            Text("测试多模态模型连接")
+                        }
+
+                        visionTestResult?.let { result ->
+                            Card(
+                                shape = RoundedCornerShape(8.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isVisionTesting) Color(0x11FFFFFF)
+                                                    else if (isVisionTestSuccess) Color(0x2200E676)
+                                                    else Color(0x22FF1744)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = result,
+                                    fontSize = 11.sp,
+                                    color = if (isVisionTesting) Color.LightGray
+                                            else if (isVisionTestSuccess) Color.Green
+                                            else Color.Red,
+                                    modifier = Modifier.padding(10.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Divider(color = Color(0x11FFFFFF))
+
+            // 2.8 主页配置
+            Text(
+                "首页配置",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.LightGray
+            )
+
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0x0AFFFFFF)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Column {
+                        Text("默认启动主页", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("选择进入应用时默认显示的页面", fontSize = 10.sp, color = Color.LightGray, modifier = Modifier.padding(top = 2.dp))
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val isChatSelected = defaultHomepage == "CHAT"
+                        val isDashboardSelected = defaultHomepage == "DASHBOARD"
+
+                        Button(
+                            onClick = { defaultHomepage = "CHAT" },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isChatSelected) Color(0xFF8E2DE2) else Color(0x15FFFFFF),
+                                contentColor = if (isChatSelected) Color.White else Color.LightGray
+                            )
+                        ) {
+                            Text("智能问答", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = { defaultHomepage = "DASHBOARD" },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isDashboardSelected) Color(0xFF8E2DE2) else Color(0x15FFFFFF),
+                                contentColor = if (isDashboardSelected) Color.White else Color.LightGray
+                            )
+                        ) {
+                            Text("最近列表", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }

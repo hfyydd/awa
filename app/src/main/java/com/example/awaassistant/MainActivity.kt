@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import com.example.awaassistant.receiver.ReminderReceiver
 import com.example.awaassistant.theme.MyApplicationTheme
+import com.example.awaassistant.util.AsrManager
 
 class MainActivity : ComponentActivity() {
 
@@ -19,6 +20,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Initialize ASR engine (loads model in background thread)
+        AsrManager.init(applicationContext)
         
         handleIntent(intent)
 
