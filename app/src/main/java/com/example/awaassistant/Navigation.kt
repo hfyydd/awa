@@ -12,13 +12,16 @@ import com.example.awaassistant.ui.settings.SettingsScreen
 import com.example.awaassistant.ui.detail.NoteDetailScreen
 
 @Composable
-fun MainNavigation(recordIdToShow: Long? = null) {
+fun MainNavigation(
+    recordIdToShow: Long? = null,
+    showQuickCapture: Boolean = false,
+    onQuickCaptureDismissed: () -> Unit = {}
+) {
     val backStack = rememberNavBackStack(Main)
 
     // 如果通过通知传来具体的 recordId，自动跳往详情页
     LaunchedEffect(recordIdToShow) {
         if (recordIdToShow != null && recordIdToShow != -1L) {
-            // 避免重复添加相同的详情页
             val currentKey = backStack.lastOrNull()
             if (currentKey !is NoteDetail || currentKey.recordId != recordIdToShow) {
                 backStack.add(NoteDetail(recordIdToShow))
@@ -33,7 +36,9 @@ fun MainNavigation(recordIdToShow: Long? = null) {
             entry<Main> {
                 MainPagerScreen(
                     onNavigateToSettings = { backStack.add(Settings) },
-                    onNavigateToDetail = { id -> backStack.add(NoteDetail(id)) }
+                    onNavigateToDetail = { id -> backStack.add(NoteDetail(id)) },
+                    showQuickCapture = showQuickCapture,
+                    onQuickCaptureDismissed = onQuickCaptureDismissed
                 )
             }
             entry<Chat> {
@@ -56,4 +61,3 @@ fun MainNavigation(recordIdToShow: Long? = null) {
         }
     )
 }
-

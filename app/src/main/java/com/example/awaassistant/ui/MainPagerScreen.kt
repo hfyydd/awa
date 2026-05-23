@@ -25,13 +25,16 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.awaassistant.ui.chat.ChatScreen
 import com.example.awaassistant.ui.chat.ChatViewModel
 import com.example.awaassistant.ui.dashboard.DashboardScreen
+import com.example.awaassistant.ui.quickcapture.QuickCaptureBottomSheet
 import kotlinx.coroutines.launch
 
 @Composable
 fun MainPagerScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToDetail: (Long) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    showQuickCapture: Boolean = false,
+    onQuickCaptureDismissed: () -> Unit = {}
 ) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -42,6 +45,15 @@ fun MainPagerScreen(
     
     // Shared ChatViewModel to trigger clear history in the header
     val chatViewModel: ChatViewModel = viewModel(factory = ChatViewModel.Factory(context))
+
+    // P0: Quick Capture Sheet 状态
+    var isQuickCaptureVisible by remember { mutableStateOf(false) }
+
+    LaunchedEffect(showQuickCapture) {
+        if (showQuickCapture) {
+            isQuickCaptureVisible = true
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -120,7 +132,7 @@ fun MainPagerScreen(
                 }
             }
         },
-        containerColor = Color(0xFF0F0C1B), // Consistent deep space background color
+        containerColor = Color(0xFF0F0C1B),
         modifier = modifier.fillMaxSize()
     ) { paddingValues ->
         HorizontalPager(
@@ -152,5 +164,15 @@ fun MainPagerScreen(
                 }
             }
         }
+    }
+
+    // P0: Quick Capture BottomSheet
+    if (isQuickCaptureVisible) {
+        QuickCaptureBottomSheet(
+            onDismiss = {
+                isQuickCaptureVisible = false
+                onQuickCaptureDismissed()
+            }
+        )
     }
 }

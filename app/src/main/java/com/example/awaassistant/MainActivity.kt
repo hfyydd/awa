@@ -8,7 +8,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import com.example.awaassistant.receiver.ReminderReceiver
 import com.example.awaassistant.theme.MyApplicationTheme
@@ -17,6 +17,12 @@ import com.example.awaassistant.util.AsrManager
 class MainActivity : ComponentActivity() {
 
     private val recordIdToShow = mutableStateOf<Long?>(null)
+    // P0: Quick Capture 触发状态
+    private val showQuickCapture = mutableStateOf(false)
+
+    companion object {
+        const val ACTION_SHOW_QUICK_CAPTURE = "com.example.awaassistant.SHOW_QUICK_CAPTURE"
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -33,7 +39,11 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    MainNavigation(recordIdToShow = recordIdToShow.value)
+                    MainNavigation(
+                        recordIdToShow = recordIdToShow.value,
+                        showQuickCapture = showQuickCapture.value,
+                        onQuickCaptureDismissed = { showQuickCapture.value = false }
+                    )
                 }
             }
         }
@@ -46,10 +56,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
-        if (intent != null && intent.hasExtra(ReminderReceiver.EXTRA_RECORD_ID)) {
-            val recordId = intent.getLongExtra(ReminderReceiver.EXTRA_RECORD_ID, -1L)
-            if (recordId != -1L) {
-                recordIdToShow.value = recordId
+        when {
+            intent?.action == ACTION_SHOW_QUICK_CAPTURE -> {
+                showQuickCapture.value = true
+            }
+            intent?.hasExtra(ReminderReceiver.EXTRA_RECORD_ID) == true -> {
+                val recordId = intent.getLongExtra(ReminderReceiver.EXTRA_RECORD_ID, -1L)
+                if (recordId != -1L) {
+                    recordIdToShow.value = recordId
+                }
             }
         }
     }
