@@ -1,6 +1,7 @@
 package com.example.awaassistant.ui.dashboard
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -15,7 +16,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -29,7 +29,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// P1: 瀑布流记忆卡片（玻璃态设计）
+// P1: 瀑布流记忆卡片（玻璃态设计 + 删除确认）
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StreamRecordCard(
@@ -39,6 +39,8 @@ fun StreamRecordCard(
     onToggleComplete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var showDeleteDialog by remember { mutableStateOf(false) }
+
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { dismissValue ->
             when (dismissValue) {
@@ -48,14 +50,74 @@ fun StreamRecordCard(
                     false
                 }
                 SwipeToDismissBoxValue.EndToStart -> {
-                    // 左滑 -> 删除
-                    onDelete()
-                    true
+                    // 左滑 -> 弹出确认对话框，不直接删除
+                    showDeleteDialog = true
+                    false
                 }
                 SwipeToDismissBoxValue.Settled -> false
             }
         }
     )
+
+    // 删除确认对话框
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            icon = {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = null,
+                    tint = Color(0xFFFF5252),
+                    modifier = Modifier.size(32.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "确认删除这条记录？",
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = record.title,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "删除后将无法恢复。",
+                        color = Color.LightGray,
+                        fontSize = 12.sp
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteDialog = false
+                        onDelete()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFFF5252)
+                    ),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Text("删除", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("取消", color = Color.LightGray)
+                }
+            },
+            containerColor = Color(0xFF1A1430),
+            shape = RoundedCornerShape(20.dp)
+        )
+    }
 
     SwipeToDismissBox(
         state = dismissState,
@@ -79,6 +141,11 @@ fun StreamRecordCard(
                 SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd
                 else -> Alignment.Center
             }
+            val label = when (direction) {
+                SwipeToDismissBoxValue.StartToEnd -> "标记完成"
+                SwipeToDismissBoxValue.EndToStart -> "删除"
+                else -> ""
+            }
 
             Box(
                 modifier = Modifier
@@ -87,12 +154,24 @@ fun StreamRecordCard(
                     .background(color.copy(alpha = 0.2f)),
                 contentAlignment = alignment
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = color,
-                    modifier = Modifier.padding(24.dp)
-                )
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = color,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = label,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = color
+                    )
+                }
             }
         },
         modifier = modifier,
@@ -165,7 +244,6 @@ private fun GlassRecordContent(
                     )
                 }
 
-                // 完成状态
                 if (isCompleted) {
                     Icon(
                         Icons.Default.CheckCircle,
@@ -176,7 +254,7 @@ private fun GlassRecordContent(
                 }
             }
 
-            // 缩略图（如果有）
+            // 缩略图
             if (record.imagePath != null) {
                 AsyncImage(
                     model = record.imagePath,
@@ -189,7 +267,6 @@ private fun GlassRecordContent(
                         .background(Color.DarkGray)
                 )
             } else if (record.sourceType != "CALORIE") {
-                // 纯文字便签：显示完成状态图标
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -236,7 +313,7 @@ private fun GlassRecordContent(
                 textDecoration = if (isCompleted) TextDecoration.LineThrough else TextDecoration.None
             )
 
-            // 卡路里进度条（如果是卡路里记录）
+            // 卡路里进度条
             if (record.sourceType == "CALORIE") {
                 val info = NutrientParser.parseNutrients(record.summary)
                 if (info != null) {
