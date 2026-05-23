@@ -86,7 +86,7 @@ dependencies {
 
   // Room
   implementation(libs.room.runtime)
-  implementation(libs.room.ktx)
+  implementation(libs.androidx.work.runtime.ktx)
   kapt(libs.room.compiler)
 
   // OkHttp for networking

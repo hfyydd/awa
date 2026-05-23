@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import com.example.awaassistant.receiver.ReminderReceiver
 import com.example.awaassistant.theme.MyApplicationTheme
 import com.example.awaassistant.util.AsrManager
+import com.example.awaassistant.widget.WidgetRefreshWorker
 
 class MainActivity : ComponentActivity() {
 
@@ -29,6 +30,9 @@ class MainActivity : ComponentActivity() {
         
         // Initialize ASR engine (loads model in background thread)
         AsrManager.init(applicationContext)
+
+        // 安排桌面小组件每日刷新
+        WidgetRefreshWorker.scheduleDaily(applicationContext)
         
         handleIntent(intent)
 
@@ -59,6 +63,13 @@ class MainActivity : ComponentActivity() {
         when {
             intent?.action == ACTION_SHOW_QUICK_CAPTURE -> {
                 showQuickCapture.value = true
+            }
+            intent?.hasExtra("open_record_id") == true -> {
+                // 来自桌面小组件的点击
+                val recordId = intent.getLongExtra("open_record_id", -1L)
+                if (recordId != -1L) {
+                    recordIdToShow.value = recordId
+                }
             }
             intent?.hasExtra(ReminderReceiver.EXTRA_RECORD_ID) == true -> {
                 val recordId = intent.getLongExtra(ReminderReceiver.EXTRA_RECORD_ID, -1L)

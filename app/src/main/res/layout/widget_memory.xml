@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:background="@drawable/widget_background"
+    android:gravity="center">
+
+    <!-- Header row: emoji + label -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="6dp">
+
+        <TextView
+            android:id="@+id/widget_emoji"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="✨"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/widget_label"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:text="时光胶囊"
+            android:textColor="#B39DFF"
+            android:textSize="11sp"
+            android:fontFamily="sans-serif-medium" />
+
+        <TextView
+            android:id="@+id/widget_days_ago"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="7天前"
+            android:textColor="#C51162"
+            android:textSize="9sp"
+            android:background="@drawable/widget_badge_bg"
+            android:paddingHorizontal="6dp"
+            android:paddingVertical="2dp" />
+    </LinearLayout>
+
+    <!-- Title -->
+    <TextView
+        android:id="@+id/widget_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="记录你的想法..."
+        android:textColor="#FFFFFF"
+        android:textSize="13sp"
+        android:fontFamily="sans-serif-bold"
+        android:maxLines="2"
+        android:ellipsize="end"
+        android:layout_marginBottom="4dp" />
+
+    <!-- Summary -->
+    <TextView
+        android:id="@+id/widget_summary"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:text="点击开始记录灵感"
+        android:textColor="#AAAAAA"
+        android:textSize="11sp"
+        android:maxLines="3"
+        android:ellipsize="end"
+        android:lineSpacingMultiplier="1.2" />
+
+    <!-- Footer: date -->
+    <TextView
+        android:id="@+id/widget_date"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textColor="#666666"
+        android:textSize="9sp"
+        android:gravity="end"
+        android:layout_marginTop="4dp" />
+
+</LinearLayout>

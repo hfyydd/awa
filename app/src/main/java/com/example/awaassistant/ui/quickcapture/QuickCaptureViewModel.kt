@@ -7,12 +7,16 @@ import androidx.lifecycle.viewModelScope
 import com.example.awaassistant.data.AppDao
 import com.example.awaassistant.data.AppDatabase
 import com.example.awaassistant.data.CaptureRecord
+import com.example.awaassistant.widget.WidgetRefreshWorker
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class QuickCaptureViewModel(private val dao: AppDao) : ViewModel() {
+class QuickCaptureViewModel(
+    private val dao: AppDao,
+    private val context: Context
+) : ViewModel() {
 
     private val _isSaving = MutableStateFlow(false)
     val isSaving: StateFlow<Boolean> = _isSaving.asStateFlow()
@@ -42,6 +46,8 @@ class QuickCaptureViewModel(private val dao: AppDao) : ViewModel() {
                 dao.insertCapture(record)
                 _saveSuccess.value = true
                 onComplete()
+                // 刷新桌面小组件
+                WidgetRefreshWorker.triggerNow(context)
             } catch (e: Exception) {
                 _saveSuccess.value = false
             } finally {
@@ -56,7 +62,7 @@ class QuickCaptureViewModel(private val dao: AppDao) : ViewModel() {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
                     val db = AppDatabase.getDatabase(context)
-                    return QuickCaptureViewModel(db.appDao()) as T
+                    return QuickCaptureViewModel(db.appDao(), context) as T
                 }
             }
         }
