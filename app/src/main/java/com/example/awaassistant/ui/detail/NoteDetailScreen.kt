@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.example.awaassistant.data.AppDatabase
 import com.example.awaassistant.data.CaptureRecord
+import com.example.awaassistant.ui.detail.NoteDetailViewModel
 import com.example.awaassistant.data.ReminderItem
 import com.example.awaassistant.data.OpenAiCompatibleClient
 import com.example.awaassistant.util.ReminderScheduler
@@ -68,6 +69,7 @@ fun NoteDetailScreen(
     
     val db = remember { AppDatabase.getDatabase(context) }
     val dao = remember { db.appDao() }
+    val viewModel = remember { NoteDetailViewModel.Factory(context).create(NoteDetailViewModel::class.java) }
 
     var record by remember { mutableStateOf<CaptureRecord?>(null) }
     var reminders by remember { mutableStateOf<List<ReminderItem>>(emptyList()) }
@@ -80,6 +82,11 @@ fun NoteDetailScreen(
         record = dao.getCaptureById(recordId)
         reminders = dao.getRemindersForRecord(recordId)
         isLoading = false
+    }
+
+    // P1: 加载关联旧思绪
+    LaunchedEffect(record) {
+        record?.let { viewModel.loadRelatedRecords(it) }
     }
 
     Scaffold(
@@ -117,6 +124,7 @@ fun NoteDetailScreen(
         } else {
             val currentRecord = record!!
             val scrollState = rememberScrollState()
+    val relatedRecords by viewModel.relatedRecords.collectAsState()
 
             Column(
                 modifier = modifier
@@ -504,6 +512,12 @@ fun NoteDetailScreen(
                                 )
                             }
                         }
+
+                        // P1: 关联旧思绪
+                        RelatedThoughtsSection(
+                            relatedRecords = relatedRecords,
+                            onRecordClick = { id -> onBack() }
+                        )
                     }
                 }
             }
