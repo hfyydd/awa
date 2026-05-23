@@ -24,6 +24,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -311,7 +314,7 @@ fun DashboardScreen(
                     }
                 } else {
                     items(records, key = { it.id }) { record ->
-                        CaptureRecordCard(
+                        StreamRecordCard(
                             record = record,
                             onClick = { onNavigateToDetail(record.id) },
                             onDelete = { viewModel.deleteRecord(context, record) },
