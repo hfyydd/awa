@@ -556,9 +556,10 @@ fun SettingsScreen(
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         val isChatSelected = defaultHomepage == "CHAT"
+                        val isQuickSelected = defaultHomepage == "QUICK"
                         val isDashboardSelected = defaultHomepage == "DASHBOARD"
 
                         Button(
@@ -568,9 +569,23 @@ fun SettingsScreen(
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (isChatSelected) Color(0xFF8E2DE2) else Color(0x15FFFFFF),
                                 contentColor = if (isChatSelected) Color.White else Color.LightGray
-                            )
+                            ),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
                         ) {
-                            Text("智能问答", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("问答", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = { defaultHomepage = "QUICK" },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isQuickSelected) Color(0xFF8E2DE2) else Color(0x15FFFFFF),
+                                contentColor = if (isQuickSelected) Color.White else Color.LightGray
+                            ),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                        ) {
+                            Text("快捷", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
 
                         Button(
@@ -580,9 +595,10 @@ fun SettingsScreen(
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (isDashboardSelected) Color(0xFF8E2DE2) else Color(0x15FFFFFF),
                                 contentColor = if (isDashboardSelected) Color.White else Color.LightGray
-                            )
+                            ),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
                         ) {
-                            Text("最近列表", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("记录", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
