@@ -55,7 +55,8 @@ fun MainNavigation(
             entry<NoteDetail> { key ->
                 NoteDetailScreen(
                     recordId = key.recordId,
-                    onBack = { backStack.removeLastOrNull() }
+                    onBack = { backStack.removeLastOrNull() },
+                    onNavigateToDetail = { id -> backStack.add(NoteDetail(id)) }
                 )
             }
         }

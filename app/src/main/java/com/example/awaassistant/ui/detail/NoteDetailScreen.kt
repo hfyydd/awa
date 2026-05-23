@@ -61,6 +61,7 @@ import androidx.compose.foundation.BorderStroke
 fun NoteDetailScreen(
     recordId: Long,
     onBack: () -> Unit,
+    onNavigateToDetail: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -516,7 +517,7 @@ fun NoteDetailScreen(
                         // P1: 关联旧思绪
                         RelatedThoughtsSection(
                             relatedRecords = relatedRecords,
-                            onRecordClick = { id -> onBack() }
+                            onRecordClick = onNavigateToDetail
                         )
                     }
                 }
