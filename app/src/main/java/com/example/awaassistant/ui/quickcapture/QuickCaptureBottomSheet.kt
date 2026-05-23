@@ -42,6 +42,7 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuickCaptureBottomSheet(
+    initialText: String = "",
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: QuickCaptureViewModel = viewModel(factory = QuickCaptureViewModel.Factory(LocalContext.current))
@@ -51,7 +52,7 @@ fun QuickCaptureBottomSheet(
     val isSaving by viewModel.isSaving.collectAsStateWithLifecycle()
     val saveSuccess by viewModel.saveSuccess.collectAsStateWithLifecycle()
 
-    var inputText by remember { mutableStateOf("") }
+    var inputText by remember { mutableStateOf(initialText) }
     var isAsrRecording by remember { mutableStateOf(false) }
     var asrStatusText by remember { mutableStateOf("点击麦克风开始说话") }
     var isAsrProcessing by remember { mutableStateOf(false) }

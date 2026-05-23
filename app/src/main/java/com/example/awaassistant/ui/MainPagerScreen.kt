@@ -36,6 +36,7 @@ fun MainPagerScreen(
     onNavigateToDetail: (Long) -> Unit,
     modifier: Modifier = Modifier,
     showQuickCapture: Boolean = false,
+    initialQuickCaptureText: String = "",
     onQuickCaptureDismissed: () -> Unit = {}
 ) {
     val coroutineScope = rememberCoroutineScope()
@@ -171,6 +172,7 @@ fun MainPagerScreen(
 
     if (isQuickCaptureVisible) {
         QuickCaptureBottomSheet(
+            initialText = initialQuickCaptureText,
             onDismiss = {
                 isQuickCaptureVisible = false
                 onQuickCaptureDismissed()
