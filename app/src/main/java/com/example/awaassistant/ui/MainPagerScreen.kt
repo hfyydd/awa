@@ -25,6 +25,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.awaassistant.ui.chat.ChatScreen
 import com.example.awaassistant.ui.chat.ChatViewModel
 import com.example.awaassistant.ui.dashboard.DashboardScreen
+import com.example.awaassistant.ui.dashboard.DashboardViewModel
+import com.example.awaassistant.ui.quickcapture.QuickActionsScreen
 import com.example.awaassistant.ui.quickcapture.QuickCaptureBottomSheet
 import kotlinx.coroutines.launch
 
@@ -41,12 +43,11 @@ fun MainPagerScreen(
     val initialPage = remember {
         com.example.awaassistant.data.SettingsManager.getDefaultHomepage(context)
     }
-    val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { 2 })
+    val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { 3 })
     
-    // Shared ChatViewModel to trigger clear history in the header
     val chatViewModel: ChatViewModel = viewModel(factory = ChatViewModel.Factory(context))
+    val dashboardViewModel: DashboardViewModel = viewModel(factory = DashboardViewModel.Factory(context))
 
-    // P0: Quick Capture Sheet 状态
     var isQuickCaptureVisible by remember { mutableStateOf(false) }
 
     LaunchedEffect(showQuickCapture) {
@@ -65,7 +66,7 @@ fun MainPagerScreen(
                     .padding(horizontal = 16.dp),
                 contentAlignment = Alignment.Center
             ) {
-                // Left Title / Logo
+                // Left Title
                 Text(
                     text = "Awa",
                     fontSize = 20.sp,
@@ -74,7 +75,7 @@ fun MainPagerScreen(
                     modifier = Modifier.align(Alignment.CenterStart)
                 )
 
-                // Center: Custom Glassmorphic Page Switcher
+                // Center: 3-tab Switcher
                 Row(
                     modifier = Modifier
                         .background(Color(0x0DFFFFFF), shape = RoundedCornerShape(20.dp))
@@ -82,7 +83,7 @@ fun MainPagerScreen(
                         .padding(4.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    val pages = listOf("问答", "最近")
+                    val pages = listOf("问答", "快捷", "记录")
                     pages.forEachIndexed { index, title ->
                         val selected = pagerState.currentPage == index
                         val backgroundColor by animateColorAsState(
@@ -102,7 +103,7 @@ fun MainPagerScreen(
                                         pagerState.animateScrollToPage(index)
                                     }
                                 }
-                                .padding(horizontal = 14.dp, vertical = 6.dp),
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -151,12 +152,18 @@ fun MainPagerScreen(
                     )
                 }
                 1 -> {
+                    // 快捷入口页：时光胶囊 + 热力图 + 功能按钮
+                    QuickActionsScreen(
+                        onNavigateToDetail = onNavigateToDetail,
+                        viewModel = dashboardViewModel
+                    )
+                }
+                2 -> {
+                    // 记录整理页：只展示卡片列表
                     DashboardScreen(
                         showTopBar = false,
                         onNavigateToChat = {
-                            coroutineScope.launch {
-                                pagerState.animateScrollToPage(0)
-                            }
+                            coroutineScope.launch { pagerState.animateScrollToPage(0) }
                         },
                         onNavigateToSettings = onNavigateToSettings,
                         onNavigateToDetail = onNavigateToDetail
@@ -166,7 +173,6 @@ fun MainPagerScreen(
         }
     }
 
-    // P0: Quick Capture BottomSheet
     if (isQuickCaptureVisible) {
         QuickCaptureBottomSheet(
             onDismiss = {

@@ -308,6 +308,26 @@ class DashboardViewModel(context: Context) : ViewModel() {
         }
     }
 
+
+    /** 快捷保存便签（无需传入 Context） */
+    fun saveQuickNote(noteText: String) {
+        viewModelScope.launch {
+            if (noteText.trim().isEmpty()) return@launch
+            val firstLine = noteText.trim().split("\n").firstOrNull() ?: ""
+            val cleanTitle = if (firstLine.length > 15) firstLine.take(15) + "..." else firstLine.ifEmpty { "快捷便签" }
+            val record = CaptureRecord(
+                title = cleanTitle,
+                summary = noteText,
+                rawContent = noteText,
+                imagePath = null,
+                timestamp = System.currentTimeMillis(),
+                tags = "快速录入",
+                sourceType = "TEXT"
+            )
+            dao.insertCapture(record)
+        }
+    }
+
     /**
      * 添加新的文本便签并保存至数据库
      */
