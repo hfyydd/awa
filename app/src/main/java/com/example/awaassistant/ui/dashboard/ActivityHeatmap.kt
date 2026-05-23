@@ -5,7 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -13,41 +13,20 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.awaassistant.data.AppDatabase
 import com.example.awaassistant.data.DailySourceCount
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Calendar
+import java.util.Locale
 
-// P2: 思考足迹热力图
 @Composable
 fun ActivityHeatmap(
+    stats: List<DailySourceCount>,
+    isLoading: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-    var activityStats by remember { mutableStateOf<List<DailySourceCount>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-
-    LaunchedEffect(Unit) {
-        isLoading = true
-        withContext(Dispatchers.IO) {
-            try {
-                val db = AppDatabase.getDatabase(context)
-                val threeMonthsAgo = System.currentTimeMillis() - 90L * 24 * 60 * 60 * 1000
-                activityStats = db.appDao().getActivityStats(threeMonthsAgo)
-            } catch (e: Exception) {
-                activityStats = emptyList()
-            }
-        }
-        isLoading = false
-    }
-
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0x0CFFFFFF)),
@@ -61,23 +40,13 @@ fun ActivityHeatmap(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = "🧠",
-                    fontSize = 14.sp
-                )
-                Text(
-                    text = "思考足迹",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
+                Text(text = "🧠", fontSize = 14.sp)
+                Text("思考足迹", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
             }
 
             if (isLoading) {
                 Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(100.dp),
+                    modifier = Modifier.fillMaxWidth().height(100.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     CircularProgressIndicator(
@@ -87,16 +56,15 @@ fun ActivityHeatmap(
                     )
                 }
             } else {
-                HeatmapGrid(stats = activityStats)
-
+                HeatmapGrid(stats = stats)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    HeatmapLegendItem(color = Color(0xFF00E676), label = "便签")
-                    HeatmapLegendItem(color = Color(0xFF8E2DE2), label = "拍照")
-                    HeatmapLegendItem(color = Color(0xFF00C9FF), label = "截屏")
-                    HeatmapLegendItem(color = Color(0xFFFFB300), label = "卡路里")
+                    LegendItem(color = Color(0xFF00E676), label = "便签")
+                    LegendItem(color = Color(0xFF8E2DE2), label = "拍照")
+                    LegendItem(color = Color(0xFF00C9FF), label = "截屏")
+                    LegendItem(color = Color(0xFFFFB300), label = "卡路里")
                 }
             }
         }
@@ -105,23 +73,15 @@ fun ActivityHeatmap(
 
 @Composable
 private fun HeatmapGrid(stats: List<DailySourceCount>) {
-    val today = remember { Calendar.getInstance() }
-    val cellSize = 12.dp
-    val cellGap = 3.dp
+    val today = Calendar.getInstance()
     val weeks = 13
+    val dateColorMap = buildDateColorMap(stats)
 
-    Canvas(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(100.dp)
-    ) {
-        val cellSizePx = cellSize.toPx()
-        val cellGapPx = cellGap.toPx()
-        val cellTotal = cellSizePx + cellGapPx
-
-        val dateColorMap = buildDateColorMap(stats)
+    Canvas(modifier = Modifier.fillMaxWidth().height(100.dp)) {
+        val cellSize = 12.dp.toPx()
+        val cellGap = 3.dp.toPx()
+        val cellTotal = cellSize + cellGap
         val todayWeek = today.get(Calendar.WEEK_OF_YEAR)
-        val todayDayOfWeek = today.get(Calendar.DAY_OF_WEEK) - 1
 
         for (week in 0 until weeks) {
             for (day in 0 until 7) {
@@ -129,19 +89,15 @@ private fun HeatmapGrid(stats: List<DailySourceCount>) {
                     set(Calendar.WEEK_OF_YEAR, todayWeek - (weeks - 1 - week))
                     set(Calendar.DAY_OF_WEEK, day + 1)
                 }
-
                 if (cal.after(today)) continue
 
                 val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(cal.time)
-                val color = dateColorMap[dateStr] ?: Color(0x0DFFFFFF)
+                val color = dateColorMap[dateStr] ?: Color(0x1AFFFFFF)
 
                 drawRoundRect(
                     color = color,
-                    topLeft = Offset(
-                        x = week * cellTotal,
-                        y = day * cellTotal
-                    ),
-                    size = Size(cellSizePx, cellSizePx),
+                    topLeft = Offset(week * cellTotal, day * cellTotal),
+                    size = Size(cellSize, cellSize),
                     cornerRadius = CornerRadius(2.dp.toPx())
                 )
             }
@@ -149,38 +105,8 @@ private fun HeatmapGrid(stats: List<DailySourceCount>) {
     }
 }
 
-private fun DrawScope.buildDateColorMap(stats: List<DailySourceCount>): Map<String, Color> {
-    val map = mutableMapOf<String, Color>()
-    val byDate = stats.groupBy { it.day }
-
-    byDate.forEach { (day, counts) ->
-        val total = counts.sumOf { it.cnt }
-        val dominant = counts.maxByOrNull { it.cnt }
-
-        val intensity = when {
-            total == 0 -> 0.1f
-            total <= 2 -> 0.3f
-            total <= 5 -> 0.5f
-            total <= 10 -> 0.7f
-            else -> 1.0f
-        }
-
-        val baseColor = when (dominant?.sourceType) {
-            "CALORIE" -> Color(0xFF00E676)
-            "TEXT" -> Color(0xFF8E2DE2)
-            "PHOTO" -> Color(0xFF00C9FF)
-            "SCREENSHOT" -> Color(0xFFFFB300)
-            else -> Color(0xFF8E2DE2)
-        }
-
-        map[day] = baseColor.copy(alpha = intensity)
-    }
-
-    return map
-}
-
 @Composable
-private fun HeatmapLegendItem(color: Color, label: String) {
+private fun LegendItem(color: Color, label: String) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -191,10 +117,31 @@ private fun HeatmapLegendItem(color: Color, label: String) {
                 .clip(RoundedCornerShape(2.dp))
                 .background(color.copy(alpha = 0.7f))
         )
-        Text(
-            text = label,
-            fontSize = 10.sp,
-            color = Color.Gray
-        )
+        Text(text = label, fontSize = 10.sp, color = Color.Gray)
     }
+}
+
+private fun buildDateColorMap(stats: List<DailySourceCount>): Map<String, Color> {
+    val map = mutableMapOf<String, Color>()
+    val byDate = stats.groupBy { it.day }
+    byDate.forEach { (day, counts) ->
+        val total = counts.sumOf { it.cnt }
+        val dominant = counts.maxByOrNull { it.cnt }
+        val intensity = when {
+            total == 0 -> 0.1f
+            total <= 2 -> 0.3f
+            total <= 5 -> 0.5f
+            total <= 10 -> 0.7f
+            else -> 1.0f
+        }
+        val baseColor = when (dominant?.sourceType) {
+            "CALORIE" -> Color(0xFF00E676)
+            "TEXT" -> Color(0xFF8E2DE2)
+            "PHOTO" -> Color(0xFF00C9FF)
+            "SCREENSHOT" -> Color(0xFFFFB300)
+            else -> Color(0xFF8E2DE2)
+        }
+        map[day] = baseColor.copy(alpha = intensity)
+    }
+    return map
 }

@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,39 +24,50 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.foundation.clickable
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.awaassistant.ui.dashboard.ActivityHeatmap
+import com.example.awaassistant.ui.dashboard.HomeSharedViewModel
 import com.example.awaassistant.ui.dashboard.MemoryCapsuleCard
-import com.example.awaassistant.ui.dashboard.DashboardViewModel
 import java.io.File
 
-// P0: 快捷入口页（从 DashboardScreen 中拆分出来）
+/**
+ * 快捷入口页
+ * 
+ * 从 HomeSharedViewModel 读取热力图和时光胶囊数据，
+ * 不自己发 IO 请求，避免切换时重复加载。
+ */
 @Composable
 fun QuickActionsScreen(
     onNavigateToDetail: (Long) -> Unit,
     modifier: Modifier = Modifier,
-    viewModel: DashboardViewModel = viewModel(factory = DashboardViewModel.Factory(LocalContext.current))
+    sharedViewModel: HomeSharedViewModel,
+    dashboardViewModel: com.example.awaassistant.ui.dashboard.DashboardViewModel
 ) {
     val context = LocalContext.current
+    val scrollState = rememberScrollState()
+
+    // 观察共享数据（不再自己发请求）
+    val memoryCapsule by sharedViewModel.memoryCapsule.collectAsState()
+    val capsuleLoading by sharedViewModel.capsuleLoading.collectAsState()
+    val activityStats by sharedViewModel.activityStats.collectAsState()
+    val statsLoading by sharedViewModel.statsLoading.collectAsState()
+
+    val isProcessing by dashboardViewModel.isProcessingPhoto.collectAsState()
+    val processingType by dashboardViewModel.processingType.collectAsState()
+
     var tempPhotoPath by remember { mutableStateOf<String?>(null) }
     var tempPhotoUriString by remember { mutableStateOf<String?>(null) }
     var captureMode by remember { mutableStateOf("NOTE") }
-    var showRecipeDialog by remember { mutableStateOf(false) }
     var showCalorieOptionDialog by remember { mutableStateOf(false) }
+    var showNoteDialog by remember { mutableStateOf(false) }
+    var noteInputText by remember { mutableStateOf("") }
+    var isAsrRecording by remember { mutableStateOf(false) }
+    var asrStatusText by remember { mutableStateOf("点击麦克风开始说话") }
+    var isAsrProcessing by remember { mutableStateOf(false) }
 
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        if (uri != null) viewModel.processCalorieGalleryPhoto(context, uri)
+        uri?.let { dashboardViewModel.processCalorieGalleryPhoto(context, it) }
     }
 
     val cameraLauncher = rememberLauncherForActivityResult(
@@ -68,19 +80,13 @@ fun QuickActionsScreen(
                 val file = File(path)
                 val uri = Uri.parse(uriStr)
                 if (captureMode == "CALORIE") {
-                    viewModel.processCaloriePhoto(context, uri, file)
+                    dashboardViewModel.processCaloriePhoto(context, uri, file)
                 } else {
-                    viewModel.processPhotoNote(context, uri, file)
+                    dashboardViewModel.processPhotoNote(context, uri, file)
                 }
             }
         }
     }
-
-    var showNoteDialog by remember { mutableStateOf(false) }
-    var noteInputText by remember { mutableStateOf("") }
-    var isAsrRecording by remember { mutableStateOf(false) }
-    var asrStatusText by remember { mutableStateOf("点击下方麦克风开始说话") }
-    var isAsrProcessing by remember { mutableStateOf(false) }
 
     val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -89,17 +95,14 @@ fun QuickActionsScreen(
             val started = com.example.awaassistant.util.AsrManager.startRecording()
             if (started) {
                 isAsrRecording = true
-                asrStatusText = "正在录音，再次点击麦克风结束..."
+                asrStatusText = "正在录音，再次点击结束..."
             } else {
-                android.widget.Toast.makeText(context, "语音引擎正在初始化，请稍候...", android.widget.Toast.LENGTH_SHORT).show()
+                android.widget.Toast.makeText(context, "语音引擎初始化中，请稍候...", android.widget.Toast.LENGTH_SHORT).show()
             }
         } else {
-            android.widget.Toast.makeText(context, "未授权录音权限，无法使用语音输入", android.widget.Toast.LENGTH_SHORT).show()
+            android.widget.Toast.makeText(context, "未授权录音权限", android.widget.Toast.LENGTH_SHORT).show()
         }
     }
-
-    val isProcessing by viewModel.isProcessingPhoto.collectAsStateWithLifecycle()
-    val processingType by viewModel.processingType.collectAsStateWithLifecycle()
 
     Column(
         modifier = modifier
@@ -109,36 +112,40 @@ fun QuickActionsScreen(
                     colors = listOf(Color(0xFF0F0C1B), Color(0xFF1E1430), Color(0xFF0D061A))
                 )
             )
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. 时光胶囊
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 时光胶囊
         MemoryCapsuleCard(
-            onDismiss = { },
-            onViewDetail = { }
+            capsule = memoryCapsule,
+            isLoading = capsuleLoading,
+            onViewDetail = onNavigateToDetail,
+            onRefresh = { sharedViewModel.refreshCapsule() }
         )
 
-        // 2. 热力图
-        ActivityHeatmap()
+        // 热力图
+        ActivityHeatmap(
+            stats = activityStats,
+            isLoading = statsLoading
+        )
 
-        // 3. 处理中加载状态
+        // 处理中状态
         if (isProcessing) {
             ProcessingLoaderCard(processingType = processingType ?: "PHOTO")
         }
 
-        // 4. 快捷行动按钮
+        // 快捷入口
         Text(
             text = "快捷入口",
             fontSize = 18.sp,
             fontWeight = FontWeight.Bold,
-            color = Color.White,
-            modifier = Modifier.padding(top = 8.dp)
+            color = Color.White
         )
 
-        Column(
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -157,7 +164,6 @@ fun QuickActionsScreen(
                     },
                     modifier = Modifier.weight(1f)
                 )
-
                 ActionCard(
                     title = "记录便签",
                     subtitle = "手动输入便签/待办",
@@ -170,7 +176,6 @@ fun QuickActionsScreen(
                     modifier = Modifier.weight(1f)
                 )
             }
-
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -183,13 +188,12 @@ fun QuickActionsScreen(
                     onClick = { showCalorieOptionDialog = true },
                     modifier = Modifier.weight(1f)
                 )
-
                 ActionCard(
                     title = "拍照配菜谱",
                     subtitle = "智能搭配家常食谱",
                     icon = Icons.Default.MenuBook,
                     gradientColors = listOf(Color(0xFF11998E), Color(0xFF38EF7D)),
-                    onClick = { showRecipeDialog = true },
+                    onClick = { showCalorieOptionDialog = true },
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -198,123 +202,98 @@ fun QuickActionsScreen(
         Spacer(modifier = Modifier.height(16.dp))
     }
 
-    // 便签输入弹窗（复用 Dashboard 的 AlertDialog 逻辑）
+    // 便签弹窗
     if (showNoteDialog) {
-        val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(label = "pulse")
-        val pulseScale by if (isAsrRecording) {
-            infiniteTransition.animateFloat(
-                initialValue = 1.0f,
-                targetValue = 1.15f,
-                animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-                    animation = androidx.compose.animation.core.tween(800, easing = androidx.compose.animation.core.FastOutSlowInEasing),
-                    repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
-                ),
-                label = "scale"
-            )
-        } else {
-            remember { mutableStateOf(1.0f) }
-        }
-
-        AlertDialog(
-            onDismissRequest = {
+        NoteInputDialog(
+            noteText = noteInputText,
+            onTextChange = { noteInputText = it },
+            isAsrRecording = isAsrRecording,
+            asrStatusText = asrStatusText,
+            isAsrProcessing = isAsrProcessing,
+            onMicClick = {
+                val hasAudioPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+                    context, android.Manifest.permission.RECORD_AUDIO
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                if (isAsrRecording) {
+                    asrStatusText = "正在识别..."
+                    isAsrProcessing = true
+                    com.example.awaassistant.util.AsrManager.stopRecording { text ->
+                        isAsrRecording = false
+                        isAsrProcessing = false
+                        if (text.isNotBlank()) {
+                            noteInputText = if (noteInputText.isBlank()) text else "$noteInputText\n$text"
+                            asrStatusText = "录入完成 ✓"
+                        } else {
+                            asrStatusText = "未检测到语音"
+                        }
+                    }
+                } else {
+                    if (hasAudioPermission) {
+                        val started = com.example.awaassistant.util.AsrManager.startRecording()
+                        if (started) {
+                            isAsrRecording = true
+                            asrStatusText = "正在录音，点击结束..."
+                        }
+                    } else {
+                        recordAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                    }
+                }
+            },
+            onSave = {
+                if (noteInputText.isNotBlank()) {
+                    dashboardViewModel.saveQuickNote(noteInputText)
+                    noteInputText = ""
+                    showNoteDialog = false
+                    android.widget.Toast.makeText(context, "已保存 ✨", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            },
+            onDismiss = {
                 if (isAsrRecording) {
                     com.example.awaassistant.util.AsrManager.stopRecording {}
                     isAsrRecording = false
                 }
                 showNoteDialog = false
-            },
-            title = {
-                Text("新建便签/待办", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            },
-            text = {
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    OutlinedTextField(
-                        value = noteInputText,
-                        onValueChange = { noteInputText = it },
-                        placeholder = { Text("写下你的便签...", color = Color.Gray, fontSize = 13.sp) },
-                        modifier = Modifier.fillMaxWidth().height(140.dp),
-                        maxLines = 8,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFF8E2DE2),
-                            unfocusedBorderColor = Color(0x33FFFFFF),
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        )
-                    )
+            }
+        )
+    }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = if (isAsrProcessing) "正在识别语音..." else asrStatusText,
-                                fontSize = 11.sp,
-                                color = if (isAsrRecording) Color(0xFF00E5FF) else Color.LightGray
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            IconButton(
-                                onClick = {
-                                    val hasAudioPermission = androidx.core.content.ContextCompat.checkSelfPermission(
-                                        context, android.Manifest.permission.RECORD_AUDIO
-                                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                                    if (isAsrRecording) {
-                                        asrStatusText = "正在识别..."
-                                        isAsrProcessing = true
-                                        com.example.awaassistant.util.AsrManager.stopRecording { text ->
-                                            isAsrRecording = false
-                                            isAsrProcessing = false
-                                            if (text.isNotBlank()) {
-                                                noteInputText = if (noteInputText.isBlank()) text else "$noteInputText\n$text"
-                                                asrStatusText = "语音录入完成！"
-                                            } else {
-                                                asrStatusText = "未检测到有效语音"
-                                            }
-                                        }
-                                    } else {
-                                        if (hasAudioPermission) {
-                                            val started = com.example.awaassistant.util.AsrManager.startRecording()
-                                            if (started) {
-                                                isAsrRecording = true
-                                                asrStatusText = "正在录音，点击结束..."
-                                            }
-                                        } else {
-                                            recordAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                                        }
-                                    }
-                                },
-                                modifier = Modifier.size(56.dp)
-                            ) {
-                                Text(text = if (isAsrRecording) "⬛" else "🎤", fontSize = 24.sp)
-                            }
-                        }
-                    }
+    // 卡路里选项弹窗
+    if (showCalorieOptionDialog) {
+        AlertDialog(
+            onDismissRequest = { showCalorieOptionDialog = false },
+            icon = { Icon(Icons.Default.Restaurant, null, tint = Color(0xFF00E676), modifier = Modifier.size(28.dp)) },
+            title = { Text("选择卡路里识别方式", fontWeight = FontWeight.Bold, color = Color.White) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("拍照：适合拍摄食物标签或餐盘", fontSize = 12.sp, color = Color.LightGray)
+                    Text("相册：从已拍摄的照片中选择", fontSize = 12.sp, color = Color.LightGray)
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        if (noteInputText.isNotBlank()) {
-                            viewModel.saveQuickNote(noteInputText)
-                            noteInputText = ""
-                            showNoteDialog = false
-                            android.widget.Toast.makeText(context, "已保存 ✨", android.widget.Toast.LENGTH_SHORT).show()
-                        }
+                        showCalorieOptionDialog = false
+                        captureMode = "CALORIE"
+                        val pair = createTempPhotoFile(context)
+                        tempPhotoPath = pair.first.absolutePath
+                        tempPhotoUriString = pair.second.toString()
+                        cameraLauncher.launch(pair.second)
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8E2DE2)),
-                    shape = RoundedCornerShape(20.dp),
-                    enabled = noteInputText.isNotBlank()
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                    shape = RoundedCornerShape(20.dp)
                 ) {
-                    Text("保存", fontWeight = FontWeight.Bold)
+                    Icon(Icons.Default.CameraAlt, null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("拍照", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showNoteDialog = false }) {
-                    Text("取消", color = Color.LightGray)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = {
+                        showCalorieOptionDialog = false
+                        galleryLauncher.launch("image/*")
+                    }) { Text("相册", color = Color.LightGray) }
+                    TextButton(onClick = { showCalorieOptionDialog = false }) { Text("取消", color = Color.Gray) }
                 }
             },
             containerColor = Color(0xFF1A1430),
@@ -347,7 +326,7 @@ private fun ActionCard(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(28.dp))
+                Icon(icon, null, tint = Color.White, modifier = Modifier.size(28.dp))
                 Column {
                     Text(title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     Spacer(modifier = Modifier.height(2.dp))
@@ -360,22 +339,11 @@ private fun ActionCard(
 
 @Composable
 private fun ProcessingLoaderCard(processingType: String) {
-    val cardColor = when (processingType) {
-        "TEXT" -> Color(0x228E2DE2)
-        "CALORIE" -> Color(0x2200E676)
-        else -> Color(0x22FFB300)
+    val (cardColor, accentColor, titleText) = when (processingType) {
+        "TEXT" -> Triple(Color(0x228E2DE2), Color(0xFFC51162), "正在调用 AI 整理便签...")
+        "CALORIE" -> Triple(Color(0x2200E676), Color(0xFF00E676), "正在分析食物卡路里...")
+        else -> Triple(Color(0x22FFB300), Color.Yellow, "正在 OCR 提取...")
     }
-    val accentColor = when (processingType) {
-        "TEXT" -> Color(0xFFC51162)
-        "CALORIE" -> Color(0xFF00E676)
-        else -> Color.Yellow
-    }
-    val titleText = when (processingType) {
-        "TEXT" -> "正在调用 AI 整理便签..."
-        "CALORIE" -> "正在分析食物卡路里..."
-        else -> "正在 OCR 提取..."
-    }
-
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = cardColor),
@@ -395,8 +363,75 @@ private fun ProcessingLoaderCard(processingType: String) {
     }
 }
 
+@Composable
+private fun NoteInputDialog(
+    noteText: String,
+    onTextChange: (String) -> Unit,
+    isAsrRecording: Boolean,
+    asrStatusText: String,
+    isAsrProcessing: Boolean,
+    onMicClick: () -> Unit,
+    onSave: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("新建便签/待办", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White) },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedTextField(
+                    value = noteText,
+                    onValueChange = onTextChange,
+                    placeholder = { Text("写下你的便签...", color = Color.Gray, fontSize = 13.sp) },
+                    modifier = Modifier.fillMaxWidth().height(140.dp),
+                    maxLines = 8,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF8E2DE2),
+                        unfocusedBorderColor = Color(0x33FFFFFF),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    )
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = if (isAsrProcessing) "正在识别语音..." else asrStatusText,
+                            fontSize = 11.sp,
+                            color = if (isAsrRecording) Color(0xFF00E5FF) else Color.LightGray
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        IconButton(onClick = onMicClick, modifier = Modifier.size(56.dp)) {
+                            Text(text = if (isAsrRecording) "⬛" else "🎤", fontSize = 24.sp)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onSave,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8E2DE2)),
+                shape = RoundedCornerShape(20.dp),
+                enabled = noteText.isNotBlank()
+            ) { Text("保存", fontWeight = FontWeight.Bold) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消", color = Color.LightGray) } },
+        containerColor = Color(0xFF1A1430),
+        shape = RoundedCornerShape(20.dp)
+    )
+}
+
 private fun createTempPhotoFile(context: Context): Pair<File, Uri> {
     val tempFile = File(context.cacheDir, "camera_temp_${System.currentTimeMillis()}.jpg")
-    val uri = androidx.core.content.FileProvider.getUriForFile(context, "com.example.awaassistant.provider", tempFile)
+    val uri = androidx.core.content.FileProvider.getUriForFile(
+        context, "com.example.awaassistant.provider", tempFile
+    )
     return Pair(tempFile, uri)
 }

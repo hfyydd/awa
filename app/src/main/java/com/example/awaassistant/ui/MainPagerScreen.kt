@@ -9,8 +9,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ClearAll
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -26,6 +25,7 @@ import com.example.awaassistant.ui.chat.ChatScreen
 import com.example.awaassistant.ui.chat.ChatViewModel
 import com.example.awaassistant.ui.dashboard.DashboardScreen
 import com.example.awaassistant.ui.dashboard.DashboardViewModel
+import com.example.awaassistant.ui.dashboard.HomeSharedViewModel
 import com.example.awaassistant.ui.quickcapture.QuickActionsScreen
 import com.example.awaassistant.ui.quickcapture.QuickCaptureBottomSheet
 import kotlinx.coroutines.launch
@@ -40,20 +40,32 @@ fun MainPagerScreen(
 ) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
+
+    // 共享 ViewModel：只在 MainPager 创建一次，避免切换时重复加载数据
+    val sharedViewModel: HomeSharedViewModel = viewModel(
+        factory = HomeSharedViewModel.Factory(context)
+    )
+    val dashboardViewModel: DashboardViewModel = viewModel(
+        factory = DashboardViewModel.Factory(context)
+    )
+    val chatViewModel: ChatViewModel = viewModel(
+        factory = ChatViewModel.Factory(context)
+    )
+
     val initialPage = remember {
         com.example.awaassistant.data.SettingsManager.getDefaultHomepage(context)
     }
     val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { 3 })
-    
-    val chatViewModel: ChatViewModel = viewModel(factory = ChatViewModel.Factory(context))
-    val dashboardViewModel: DashboardViewModel = viewModel(factory = DashboardViewModel.Factory(context))
 
     var isQuickCaptureVisible by remember { mutableStateOf(false) }
 
+    LaunchedEffect(pagerState) {
+        // 首次显示时初始化共享数据（只触发一次）
+        sharedViewModel.initialize()
+    }
+
     LaunchedEffect(showQuickCapture) {
-        if (showQuickCapture) {
-            isQuickCaptureVisible = true
-        }
+        if (showQuickCapture) isQuickCaptureVisible = true
     }
 
     Scaffold(
@@ -66,7 +78,6 @@ fun MainPagerScreen(
                     .padding(horizontal = 16.dp),
                 contentAlignment = Alignment.Center
             ) {
-                // Left Title
                 Text(
                     text = "Awa",
                     fontSize = 20.sp,
@@ -75,7 +86,6 @@ fun MainPagerScreen(
                     modifier = Modifier.align(Alignment.CenterStart)
                 )
 
-                // Center: 3-tab Switcher
                 Row(
                     modifier = Modifier
                         .background(Color(0x0DFFFFFF), shape = RoundedCornerShape(20.dp))
@@ -83,10 +93,9 @@ fun MainPagerScreen(
                         .padding(4.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    val pages = listOf("问答", "快捷", "记录")
-                    pages.forEachIndexed { index, title ->
+                    listOf("问答", "快捷", "记录").forEachIndexed { index, title ->
                         val selected = pagerState.currentPage == index
-                        val backgroundColor by animateColorAsState(
+                        val bgColor by animateColorAsState(
                             targetValue = if (selected) Color(0xFF8E2DE2) else Color.Transparent,
                             label = "tabBg"
                         )
@@ -97,11 +106,9 @@ fun MainPagerScreen(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(16.dp))
-                                .background(backgroundColor)
+                                .background(bgColor)
                                 .clickable {
-                                    coroutineScope.launch {
-                                        pagerState.animateScrollToPage(index)
-                                    }
+                                    coroutineScope.launch { pagerState.animateScrollToPage(index) }
                                 }
                                 .padding(horizontal = 12.dp, vertical = 6.dp),
                             contentAlignment = Alignment.Center
@@ -116,7 +123,6 @@ fun MainPagerScreen(
                     }
                 }
 
-                // Right Actions
                 Row(
                     modifier = Modifier.align(Alignment.CenterEnd),
                     verticalAlignment = Alignment.CenterVertically,
@@ -124,11 +130,11 @@ fun MainPagerScreen(
                 ) {
                     if (pagerState.currentPage == 0) {
                         IconButton(onClick = { chatViewModel.clearHistory() }) {
-                            Icon(Icons.Default.ClearAll, contentDescription = "清空历史", tint = Color.LightGray)
+                            Icon(Icons.Default.ClearAll, "清空历史", tint = Color.LightGray)
                         }
                     }
                     IconButton(onClick = onNavigateToSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "设置", tint = Color.White)
+                        Icon(Icons.Default.Settings, "设置", tint = Color.White)
                     }
                 }
             }
@@ -138,37 +144,27 @@ fun MainPagerScreen(
     ) { paddingValues ->
         HorizontalPager(
             state = pagerState,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
+            modifier = Modifier.fillMaxSize().padding(paddingValues)
         ) { page ->
             when (page) {
-                0 -> {
-                    ChatScreen(
-                        showTopBar = false,
-                        viewModel = chatViewModel,
-                        onBack = {},
-                        onNavigateToDetail = onNavigateToDetail
-                    )
-                }
-                1 -> {
-                    // 快捷入口页：时光胶囊 + 热力图 + 功能按钮
-                    QuickActionsScreen(
-                        onNavigateToDetail = onNavigateToDetail,
-                        viewModel = dashboardViewModel
-                    )
-                }
-                2 -> {
-                    // 记录整理页：只展示卡片列表
-                    DashboardScreen(
-                        showTopBar = false,
-                        onNavigateToChat = {
-                            coroutineScope.launch { pagerState.animateScrollToPage(0) }
-                        },
-                        onNavigateToSettings = onNavigateToSettings,
-                        onNavigateToDetail = onNavigateToDetail
-                    )
-                }
+                0 -> ChatScreen(
+                    showTopBar = false,
+                    viewModel = chatViewModel,
+                    onBack = {},
+                    onNavigateToDetail = onNavigateToDetail
+                )
+                1 -> QuickActionsScreen(
+                    onNavigateToDetail = onNavigateToDetail,
+                    sharedViewModel = sharedViewModel,
+                    dashboardViewModel = dashboardViewModel
+                )
+                2 -> DashboardScreen(
+                    showTopBar = false,
+                    onNavigateToChat = { coroutineScope.launch { pagerState.animateScrollToPage(0) } },
+                    onNavigateToSettings = onNavigateToSettings,
+                    onNavigateToDetail = onNavigateToDetail,
+                    viewModel = dashboardViewModel
+                )
             }
         }
     }
