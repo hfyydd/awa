@@ -26,6 +26,16 @@ abstract class AppDatabase : RoomDatabase() {
                 )
                 .fallbackToDestructiveMigration()
                 .build()
+                
+                // 监听 capture_records 表的变化，实时自动更新桌面小组件
+                instance.invalidationTracker.addObserver(
+                    object : androidx.room.InvalidationTracker.Observer("capture_records") {
+                        override fun onInvalidated(tables: Set<String>) {
+                            com.example.awaassistant.widget.MemoryWidget.triggerRefresh(context.applicationContext)
+                        }
+                    }
+                )
+                
                 INSTANCE = instance
                 instance
             }

@@ -178,4 +178,16 @@ object AsrManager {
         recognizer = null
         isInitialized = false
     }
+
+    /**
+     * 同步停止录音并返回文字（阻塞直到识别完成）
+     */
+    fun stopRecordingSync(): String {
+        if (!isRecording) return ""
+        isRecording = false
+        recordingJob?.cancel()
+        recordingJob = null
+        return performTranscription()
+    }
+
 }

@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -124,26 +125,38 @@ fun SettingsScreen(
         }
     }
 
+    val saveSettings = {
+        SettingsManager.setApiKey(context, apiKey.trim())
+        SettingsManager.setBaseUrl(context, baseUrl.trim())
+        SettingsManager.setModelName(context, modelName.trim())
+        SettingsManager.setDedicatedVisionEnabled(context, isDedicatedVisionEnabled)
+        SettingsManager.setVisionApiKey(context, visionApiKey.trim())
+        SettingsManager.setVisionBaseUrl(context, visionBaseUrl.trim())
+        SettingsManager.setVisionModelName(context, visionModelName.trim())
+        SettingsManager.setDefaultHomepage(context, defaultHomepage)
+    }
+
+    BackHandler {
+        saveSettings()
+        onBack()
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("系统与模型设置", fontWeight = FontWeight.Bold, color = Color.White) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = {
+                        saveSettings()
+                        onBack()
+                    }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "返回", tint = Color.White)
                     }
                 },
                 actions = {
                     IconButton(
                         onClick = {
-                            SettingsManager.setApiKey(context, apiKey.trim())
-                            SettingsManager.setBaseUrl(context, baseUrl.trim())
-                            SettingsManager.setModelName(context, modelName.trim())
-                            SettingsManager.setDedicatedVisionEnabled(context, isDedicatedVisionEnabled)
-                            SettingsManager.setVisionApiKey(context, visionApiKey.trim())
-                            SettingsManager.setVisionBaseUrl(context, visionBaseUrl.trim())
-                            SettingsManager.setVisionModelName(context, visionModelName.trim())
-                            SettingsManager.setDefaultHomepage(context, defaultHomepage)
+                            saveSettings()
                             Toast.makeText(context, "配置已保存", Toast.LENGTH_SHORT).show()
                             onBack()
                         }

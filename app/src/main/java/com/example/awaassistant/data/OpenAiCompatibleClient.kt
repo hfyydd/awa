@@ -334,6 +334,185 @@ object OpenAiCompatibleClient {
     }
 
     /**
+     * 拍照配菜谱 (支持 Vision 多模态及 OCR 降级逻辑)
+     */
+    suspend fun analyzeRecipeImage(context: Context, imageFile: File, ocrText: String): AnalysisResult? = withContext(Dispatchers.IO) {
+        val (apiKey, baseUrl, model) = getVisionApiConfig(context)
+
+        if (apiKey.isEmpty()) {
+            Log.e(TAG, "API Key is empty, skipping Recipe analysis.")
+            return@withContext null
+        }
+
+        val currentTimeString = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+
+        val promptContent = """
+            你是一个优秀的家庭主厨和营养配餐专家。
+            【最核心指令】你必须先仔细观察并识别出图片中包含什么具体的食材、配料（或者从OCR文本中识别出来的食材），然后再去搭配/设计家常菜谱。
+            当前系统时间是: $currentTimeString
+            
+            请将整理好的结果以符合以下 JSON Schema 格式 of JSON 字符串返回：
+            
+            【JSON 格式要求】
+            {
+              "title": "推荐的菜谱名称（10字以内，比如'家常青椒炒肉'）",
+              "summary": "【识别出的食材】\\n- [食材描述及新鲜程度]\\n\\n【食材明细估算】\\n- 🥩 食材1 (约100g)：150 kcal\\n- 🌶️ 食材2 (约50g)：20 kcal\\n\\n【推荐搭配菜谱】\\n- 🍳 推荐菜名：做法步骤描述...\\n\\n【健康点评与烹饪建议】\\n- [专业营养建议、火候建议与点评]",
+              "tags": ["配菜谱", "家常食谱", "美食"], // 2 到 3 个描述性标签
+              "reminders": [] // 保持为空列表 []
+            }
+
+            【整理要求】
+            1. 必须先识别后推荐：必须先在【识别出的食材】区块中明确列出您在图片中看到了哪些蔬菜、肉类或配料。
+            2. 结构规范：summary 字段必须是一个纯文本字符串（使用 \\n 进行换行，绝对不要输出为 JSON 对象），必须依次且完整地包含这四个主标题：`【识别出的食材】`、`【食材明细估算】`、`【推荐搭配菜谱】`、`【健康点评与烹饪建议】`。
+            3. 输出格式：直接输出纯 JSON 字符串，严禁包含任何 Markdown 格式包裹（如 ```json 等）。
+        """.trimIndent()
+
+        // 1. 尝试多模态请求 (Vision)
+        try {
+            Log.d(TAG, "Attempting multimodal recipe analysis...")
+            val bytes = compressImageFile(imageFile)
+            val base64Image = Base64.encodeToString(bytes, Base64.NO_WRAP)
+
+            val userContent = JSONArray().apply {
+                put(JSONObject().apply {
+                    put("type", "text")
+                    put("text", promptContent)
+                })
+                put(JSONObject().apply {
+                    put("type", "image_url")
+                    put("image_url", JSONObject().apply {
+                        put("url", "data:image/jpeg;base64,$base64Image")
+                    })
+                })
+            }
+
+            val messages = JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "user")
+                    put("content", userContent)
+                })
+            }
+
+            val payload = JSONObject().apply {
+                put("model", model)
+                put("messages", messages)
+                put("temperature", 0.3)
+                put("max_tokens", 1024)
+                if (model.contains("glm-4.6v")) {
+                    put("thinking", JSONObject().apply {
+                        put("type", "disabled")
+                    })
+                }
+            }
+
+            val requestBody = payload.toString().toRequestBody(JSON_MEDIA_TYPE)
+            val requestUrl = if (baseUrl.endsWith("/")) "${baseUrl}chat/completions" else "$baseUrl/chat/completions"
+
+            val request = Request.Builder()
+                .url(requestUrl)
+                .addHeader("Authorization", "Bearer $apiKey")
+                .addHeader("Content-Type", "application/json")
+                .post(requestBody)
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val responseBody = response.body?.string()
+                    if (responseBody != null) {
+                        Log.d(TAG, "Multimodal Recipe Response: $responseBody")
+                        val jsonResponse = JSONObject(responseBody)
+                        val choices = jsonResponse.getJSONArray("choices")
+                        if (choices.length() > 0) {
+                            val content = choices.getJSONObject(0)
+                                .getJSONObject("message")
+                                .getString("content")
+                            val result = parseAnalysisResult(content)
+                            if (result != null) {
+                                return@withContext result
+                            }
+                        }
+                    }
+                } else {
+                    Log.w(TAG, "Multimodal recipe request failed with code: ${response.code}. Falling back to text OCR...")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Multimodal recipe analysis failed: ${e.message}. Falling back to text OCR...", e)
+        }
+
+        // 2. 降级为文本请求 (OCR)
+        try {
+            Log.d(TAG, "Falling back to text-only OCR recipe analysis...")
+            val fallbackPromptContent = """
+                你是一个优秀的家庭主厨和营养配餐专家。由于多模态识别暂不可用，请根据以下从食材/厨房照片中提取出的 OCR 文字，识别食材，并推荐适合的家常菜谱。
+                当前系统时间是: $currentTimeString
+                
+                请将整理好的结果以符合以下 JSON Schema 格式的 JSON 字符串返回：
+                
+                【JSON 格式要求】
+                {
+                  "title": "推荐的菜谱名称（10字以内，比如'青椒炒土豆丝'）",
+                  "summary": "【识别出的食材】\\n- [食材描述及分量]\\n\\n【食材明细估算】\\n- 🥔 食材1 (约100g)：50 kcal\\n\\n【推荐搭配菜谱】\\n- 🍳 推荐菜名：做法步骤描述...\\n\\n【健康点评与烹饪建议】\\n- [烹饪小贴士和营养搭配建议]",
+                  "tags": ["配菜谱", "家常食谱"], 
+                  "reminders": []
+                }
+
+                【提取的 OCR 文字】
+                $ocrText
+
+                【整理要求】
+                1. 结构规范：summary 字段必须是一个纯文本字符串（使用 \\n 进行换行，绝对不要输出为 JSON 对象），必须依次且完整地包含这四个主标题：`【识别出的食材】`、`【食材明细估算】`、`【推荐搭配菜谱】`、`【健康点评与烹饪建议】`。
+                2. 输出格式：直接输出纯 JSON 字符串，严禁包含任何 Markdown 格式包裹（如 ```json 等）。
+            """.trimIndent()
+
+            val messages = JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "user")
+                    put("content", fallbackPromptContent)
+                })
+            }
+
+            val payload = JSONObject().apply {
+                put("model", model)
+                put("messages", messages)
+                put("temperature", 0.3)
+                put("max_tokens", 1024)
+            }
+
+            val requestBody = payload.toString().toRequestBody(JSON_MEDIA_TYPE)
+            val requestUrl = if (baseUrl.endsWith("/")) "${baseUrl}chat/completions" else "$baseUrl/chat/completions"
+
+            val request = Request.Builder()
+                .url(requestUrl)
+                .addHeader("Authorization", "Bearer $apiKey")
+                .addHeader("Content-Type", "application/json")
+                .post(requestBody)
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val responseBody = response.body?.string()
+                    if (responseBody != null) {
+                        Log.d(TAG, "OCR Recipe Response: $responseBody")
+                        val jsonResponse = JSONObject(responseBody)
+                        val choices = jsonResponse.getJSONArray("choices")
+                        if (choices.length() > 0) {
+                            val content = choices.getJSONObject(0)
+                                .getJSONObject("message")
+                                .getString("content")
+                            return@withContext parseAnalysisResult(content)
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "OCR recipe analysis failed too", e)
+        }
+
+        return@withContext null
+    }
+
+    /**
      * 基于本地检索内容的 RAG 问答
      */
     private fun getFriendlyDateTime(timestamp: Long): String {

@@ -225,6 +225,7 @@ private fun GlassRecordContent(
             ) {
                 val (badgeColor, badgeBg, typeText) = when (record.sourceType) {
                     "CALORIE" -> Triple(Color(0xFF00E676), Color(0x3300E676), "卡路里")
+                    "RECIPE" -> Triple(Color(0xFF11998E), Color(0x3311998E), "食谱")
                     "SCREENSHOT" -> Triple(Color(0xFF00C9FF), Color(0x3300C9FF), "截屏")
                     "PHOTO" -> Triple(Color(0xFF8E2DE2), Color(0x338E2DE2), "拍照")
                     else -> Triple(Color(0xFFFFB300), Color(0x33FFB300), "便签")
@@ -363,9 +364,16 @@ private fun GlassRecordContent(
                 record.tags.split(",").take(2).forEach { tag ->
                     val cleanTag = tag.trim()
                     if (cleanTag.isNotEmpty() && cleanTag != "处理中") {
+                        val (tagBg, tagContent) = when (record.sourceType) {
+                            "CALORIE" -> Pair(Color(0x1F00E676), Color(0xFF00E676))
+                            "RECIPE" -> Pair(Color(0x1F11998E), Color(0xFF11998E))
+                            "SCREENSHOT" -> Pair(Color(0x1F00C9FF), Color(0xFF00C9FF))
+                            "PHOTO" -> Pair(Color(0x1F8E2DE2), Color(0xFF8E2DE2))
+                            else -> Pair(Color(0x1F8E2DE2), Color(0xFF8E2DE2))
+                        }
                         Badge(
-                            containerColor = Color(0x1F2DE28E),
-                            contentColor = Color(0xFF00E676)
+                            containerColor = tagBg,
+                            contentColor = tagContent
                         ) {
                             Text(cleanTag, fontSize = 9.sp)
                         }

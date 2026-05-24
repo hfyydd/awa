@@ -868,6 +868,7 @@ fun SourceChip(
                     "SCREENSHOT" -> "屏幕截图"
                     "PHOTO" -> "手拍笔记"
                     "CALORIE" -> "卡路里记录"
+                    "RECIPE" -> "智能食谱"
                     else -> "纯文本记录"
                 }
                 Text(

@@ -87,8 +87,8 @@ class MemoryWidget : AppWidgetProvider() {
                 val now = System.currentTimeMillis()
                 val dayMs = 86400000L
 
-                // 从 3-7天、7-30天、30-365天 三个窗口随机抽取
-                val windows = listOf(3L to 7L, 7L to 30L, 30L to 365L)
+                // 从 3-7天、7-30天、30-365天、0-3天 窗口随机抽取
+                val windows = listOf(3L to 7L, 7L to 30L, 30L to 365L, 0L to 3L)
 
                 for ((fromDays, toDays) in windows) {
                     val toTs = now - dayMs * fromDays
@@ -142,6 +142,8 @@ class MemoryWidget : AppWidgetProvider() {
                 views.setTextViewText(R.id.widget_date, dateFmt.format(Date(capsule.timestamp)))
 
                 val (label, emoji) = when {
+                    capsule.daysAgo == 0 -> "今日的灵感" to "✨"
+                    capsule.daysAgo <= 2 -> "最近的思绪" to "🌱"
                     capsule.daysAgo <= 7 -> "7天前的灵感" to "✨"
                     capsule.daysAgo <= 30 -> "30天前的回顾" to "📅"
                     capsule.daysAgo <= 365 -> "1年前的珍藏" to "🏆"

@@ -70,9 +70,9 @@ interface AppDao {
     """)
     suspend fun getRandomHistoricalRecord(cutoff: Long): CaptureRecord?
 
-    // P2: 热力图统计 - 按日期和来源类型统计
+    // P2: 热力图统计 - 按日期和来源类型统计 (使用 local timezone 转换)
     @Query("""
-        SELECT date(timestamp/1000, 'unixepoch') as day, 
+        SELECT date(timestamp/1000, 'unixepoch', 'localtime') as day, 
                sourceType, 
                COUNT(*) as cnt
         FROM capture_records

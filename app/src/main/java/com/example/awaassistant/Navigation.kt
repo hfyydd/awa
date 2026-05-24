@@ -15,6 +15,7 @@ import com.example.awaassistant.ui.detail.NoteDetailScreen
 fun MainNavigation(
     recordIdToShow: Long? = null,
     showQuickCapture: Boolean = false,
+    initialQuickCaptureText: String = "",
     onQuickCaptureDismissed: () -> Unit = {}
 ) {
     val backStack = rememberNavBackStack(Main)
@@ -38,6 +39,7 @@ fun MainNavigation(
                     onNavigateToSettings = { backStack.add(Settings) },
                     onNavigateToDetail = { id -> backStack.add(NoteDetail(id)) },
                     showQuickCapture = showQuickCapture,
+                    initialQuickCaptureText = initialQuickCaptureText,
                     onQuickCaptureDismissed = onQuickCaptureDismissed
                 )
             }

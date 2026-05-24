@@ -381,6 +381,144 @@ class DashboardViewModel(context: Context) : ViewModel() {
         }
     }
 
+    /**
+     * 处理拍摄的配菜谱照片
+     */
+    fun processRecipePhoto(context: Context, photoUri: Uri, imageFile: File) {
+        viewModelScope.launch {
+            _processingType.value = "RECIPE"
+            _isProcessingPhoto.value = true
+            Toast.makeText(context, "开始识别食材并搭配菜谱，请稍后...", Toast.LENGTH_SHORT).show()
+            try {
+                // 1. 本地 OCR 提取中英文文字作为辅助
+                val ocrText = try {
+                    LocalOcrHelper.recognizeText(context, photoUri)
+                } catch (e: Exception) {
+                    ""
+                }
+
+                // 2. 调用大模型分析菜谱
+                val result = OpenAiCompatibleClient.analyzeRecipeImage(context, imageFile, ocrText)
+
+                val title: String
+                val summary: String
+                val tags: String
+
+                if (result != null) {
+                    title = result.title
+                    summary = result.summary
+                    tags = result.tags.joinToString(",")
+                } else {
+                    title = "推荐菜谱 (${SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date())})"
+                    summary = "（AI 分析失败，无法生成菜谱。请检查网络配置或尝试使用支持 Vision 的大模型）" + if (ocrText.isNotEmpty()) "\n\n提取到的文字信息：\n$ocrText" else ""
+                    tags = "配菜谱,美食"
+                }
+
+                // 3. 将拍摄临时文件移动到永久存储目录
+                val permanentFile = saveImageToPermanentStorage(context, imageFile)
+                
+                val record = CaptureRecord(
+                    title = title,
+                    summary = summary,
+                    rawContent = ocrText.ifEmpty { "食材图片" },
+                    imagePath = permanentFile.absolutePath,
+                    timestamp = System.currentTimeMillis(),
+                    tags = tags,
+                    sourceType = "RECIPE"
+                )
+
+                // 4. 插入数据库
+                dao.insertCapture(record)
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "菜谱搭配成功: $title", Toast.LENGTH_LONG).show()
+                }
+
+            } catch (e: Exception) {
+                Log.e("DashboardVM", "Error processing recipe photo", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "搭配菜谱出错: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            } finally {
+                _processingType.value = null
+                _isProcessingPhoto.value = false
+            }
+        }
+    }
+
+    /**
+     * 从相册选择并处理配菜谱照片
+     */
+    fun processRecipeGalleryPhoto(context: Context, photoUri: Uri) {
+        viewModelScope.launch {
+            _processingType.value = "RECIPE"
+            _isProcessingPhoto.value = true
+            Toast.makeText(context, "正在读取相册图片，请稍后...", Toast.LENGTH_SHORT).show()
+            try {
+                // 1. 拷贝到临时文件
+                val tempFile = File(context.cacheDir, "gallery_temp_${System.currentTimeMillis()}.jpg")
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(photoUri)?.use { inputStream ->
+                        tempFile.outputStream().use { outputStream ->
+                            inputStream.copyTo(outputStream)
+                        }
+                    }
+                }
+
+                // 2. 本地 OCR
+                val ocrText = try {
+                    LocalOcrHelper.recognizeText(context, photoUri)
+                } catch (e: Exception) {
+                    ""
+                }
+
+                // 3. AI 分析
+                val result = OpenAiCompatibleClient.analyzeRecipeImage(context, tempFile, ocrText)
+
+                val title: String
+                val summary: String
+                val tags: String
+
+                if (result != null) {
+                    title = result.title
+                    summary = result.summary
+                    tags = result.tags.joinToString(",")
+                } else {
+                    title = "推荐菜谱 (${SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date())})"
+                    summary = "（AI 分析失败，无法生成菜谱。请检查网络配置或尝试使用支持 Vision 的大模型）" + if (ocrText.isNotEmpty()) "\n\n提取到的文字信息：\n$ocrText" else ""
+                    tags = "配菜谱,美食"
+                }
+
+                // 4. 移动到永久存储
+                val permanentFile = saveImageToPermanentStorage(context, tempFile)
+
+                val record = CaptureRecord(
+                    title = title,
+                    summary = summary,
+                    rawContent = ocrText.ifEmpty { "食材图片" },
+                    imagePath = permanentFile.absolutePath,
+                    timestamp = System.currentTimeMillis(),
+                    tags = tags,
+                    sourceType = "RECIPE"
+                )
+
+                dao.insertCapture(record)
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "菜谱搭配成功: $title", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                Log.e("DashboardVM", "Error processing gallery recipe photo", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "处理相册图片出错: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            } finally {
+                _processingType.value = null
+                _isProcessingPhoto.value = false
+            }
+        }
+    }
+
     private suspend fun saveImageToPermanentStorage(context: Context, tempFile: File): File = withContext(Dispatchers.IO) {
         val dir = File(context.filesDir, "photos")
         if (!dir.exists()) {

@@ -172,12 +172,20 @@ fun NoteDetailScreen(
                             "SCREENSHOT" -> "来自屏幕截取"
                             "PHOTO" -> "来自手拍笔记"
                             "CALORIE" -> "来自健康卡路里记录"
+                            "RECIPE" -> "来自智能食谱搭配"
                             else -> "纯文字提取"
+                        }
+                        val typeColor = when (currentRecord.sourceType) {
+                            "SCREENSHOT" -> Color(0xFF00C9FF)
+                            "PHOTO" -> Color(0xFF8E2DE2)
+                            "CALORIE" -> Color(0xFF00E676)
+                            "RECIPE" -> Color(0xFF11998E)
+                            else -> Color(0xFF8E2DE2)
                         }
                         Text(
                             typeText,
                             fontSize = 12.sp,
-                            color = Color(0xFF8E2DE2),
+                            color = typeColor,
                             fontWeight = FontWeight.SemiBold
                         )
 
@@ -198,9 +206,16 @@ fun NoteDetailScreen(
                         ) {
                             currentRecord.tags.split(",").forEach { tag ->
                                 if (tag.trim().isNotEmpty()) {
+                                    val (tagBg, tagContent) = when (currentRecord.sourceType) {
+                                        "CALORIE" -> Pair(Color(0x1F00E676), Color(0xFF00E676))
+                                        "RECIPE" -> Pair(Color(0x1F11998E), Color(0xFF11998E))
+                                        "SCREENSHOT" -> Pair(Color(0x1F00C9FF), Color(0xFF00C9FF))
+                                        "PHOTO" -> Pair(Color(0x1F8E2DE2), Color(0xFF8E2DE2))
+                                        else -> Pair(Color(0x1F8E2DE2), Color(0xFF8E2DE2))
+                                    }
                                     Badge(
-                                        containerColor = Color(0x1F2DE28E),
-                                        contentColor = Color(0xFF00E676),
+                                        containerColor = tagBg,
+                                        contentColor = tagContent,
                                         modifier = Modifier.padding(2.dp)
                                     ) {
                                         Text(tag, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 4.dp))
@@ -513,13 +528,13 @@ fun NoteDetailScreen(
                                 )
                             }
                         }
-
-                        // P1: 关联旧思绪
-                        RelatedThoughtsSection(
-                            relatedRecords = relatedRecords,
-                            onRecordClick = onNavigateToDetail
-                        )
                     }
+
+                    // P1: 关联旧思绪
+                    RelatedThoughtsSection(
+                        relatedRecords = relatedRecords,
+                        onRecordClick = onNavigateToDetail
+                    )
                 }
             }
         }
@@ -906,17 +921,19 @@ fun FormattedSummary(summary: String, modifier: Modifier = Modifier) {
                         
                     currentSection = when {
                         titleText.contains("食材") || titleText.contains("明细") -> "INGREDIENTS"
+                        titleText.contains("食谱") || titleText.contains("菜谱") || titleText.contains("推荐") || titleText.contains("做法") -> "RECIPE"
                         titleText.contains("识别") || titleText.contains("食物") || titleText.contains("菜") -> "RECOGNITION"
                         titleText.contains("估算") || titleText.contains("卡路里") || titleText.contains("成分") -> "CALORIE"
-                        titleText.contains("点评") || titleText.contains("建议") || titleText.contains("健康") -> "ADVICE"
+                        titleText.contains("点评") || titleText.contains("建议") || titleText.contains("健康") || titleText.contains("烹饪") -> "ADVICE"
                         else -> "OTHER"
                     }
                     
-                    val icon = when {
-                        currentSection == "INGREDIENTS" -> "🥗"
-                        titleText.contains("识别") || titleText.contains("食物") || titleText.contains("菜") -> "🔍"
-                        titleText.contains("估算") || titleText.contains("卡路里") || titleText.contains("成分") -> "📊"
-                        titleText.contains("点评") || titleText.contains("建议") || titleText.contains("健康") -> "💡"
+                    val icon = when (currentSection) {
+                        "INGREDIENTS" -> "🥗"
+                        "RECIPE" -> "🍳"
+                        "RECOGNITION" -> "🔍"
+                        "CALORIE" -> "📊"
+                        "ADVICE" -> "💡"
                         else -> "✨"
                     }
                     

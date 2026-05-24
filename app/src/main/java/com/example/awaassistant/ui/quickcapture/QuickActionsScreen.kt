@@ -58,6 +58,7 @@ fun QuickActionsScreen(
     var tempPhotoUriString by remember { mutableStateOf<String?>(null) }
     var captureMode by remember { mutableStateOf("NOTE") }
     var showCalorieOptionDialog by remember { mutableStateOf(false) }
+
     var showNoteDialog by remember { mutableStateOf(false) }
     var noteInputText by remember { mutableStateOf("") }
     var isAsrRecording by remember { mutableStateOf(false) }
@@ -67,7 +68,13 @@ fun QuickActionsScreen(
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        uri?.let { dashboardViewModel.processCalorieGalleryPhoto(context, it) }
+        uri?.let {
+            if (captureMode == "RECIPE") {
+                dashboardViewModel.processRecipeGalleryPhoto(context, it)
+            } else {
+                dashboardViewModel.processCalorieGalleryPhoto(context, it)
+            }
+        }
     }
 
     val cameraLauncher = rememberLauncherForActivityResult(
@@ -79,10 +86,10 @@ fun QuickActionsScreen(
             if (path != null && uriStr != null) {
                 val file = File(path)
                 val uri = Uri.parse(uriStr)
-                if (captureMode == "CALORIE") {
-                    dashboardViewModel.processCaloriePhoto(context, uri, file)
-                } else {
-                    dashboardViewModel.processPhotoNote(context, uri, file)
+                when (captureMode) {
+                    "CALORIE" -> dashboardViewModel.processCaloriePhoto(context, uri, file)
+                    "RECIPE" -> dashboardViewModel.processRecipePhoto(context, uri, file)
+                    else -> dashboardViewModel.processPhotoNote(context, uri, file)
                 }
             }
         }
@@ -117,14 +124,6 @@ fun QuickActionsScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Spacer(modifier = Modifier.height(8.dp))
-
-        // 时光胶囊
-        MemoryCapsuleCard(
-            capsule = memoryCapsule,
-            isLoading = capsuleLoading,
-            onViewDetail = onNavigateToDetail,
-            onRefresh = { sharedViewModel.refreshCapsule() }
-        )
 
         // 热力图
         ActivityHeatmap(
@@ -193,7 +192,9 @@ fun QuickActionsScreen(
                     subtitle = "智能搭配家常食谱",
                     icon = Icons.Default.MenuBook,
                     gradientColors = listOf(Color(0xFF11998E), Color(0xFF38EF7D)),
-                    onClick = { showCalorieOptionDialog = true },
+                    onClick = {
+                        android.widget.Toast.makeText(context, "功能开发中，敬请期待！", android.widget.Toast.LENGTH_SHORT).show()
+                    },
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -291,6 +292,7 @@ fun QuickActionsScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = {
                         showCalorieOptionDialog = false
+                        captureMode = "CALORIE"
                         galleryLauncher.launch("image/*")
                     }) { Text("相册", color = Color.LightGray) }
                     TextButton(onClick = { showCalorieOptionDialog = false }) { Text("取消", color = Color.Gray) }
@@ -300,6 +302,8 @@ fun QuickActionsScreen(
             shape = RoundedCornerShape(20.dp)
         )
     }
+
+
 }
 
 @Composable
@@ -342,6 +346,7 @@ private fun ProcessingLoaderCard(processingType: String) {
     val (cardColor, accentColor, titleText) = when (processingType) {
         "TEXT" -> Triple(Color(0x228E2DE2), Color(0xFFC51162), "正在调用 AI 整理便签...")
         "CALORIE" -> Triple(Color(0x2200E676), Color(0xFF00E676), "正在分析食物卡路里...")
+        "RECIPE" -> Triple(Color(0x2211998E), Color(0xFF11998E), "正在分析食材并推荐菜谱...")
         else -> Triple(Color(0x22FFB300), Color.Yellow, "正在 OCR 提取...")
     }
     Card(

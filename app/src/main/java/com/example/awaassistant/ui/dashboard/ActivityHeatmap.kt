@@ -59,12 +59,13 @@ fun ActivityHeatmap(
                 HeatmapGrid(stats = stats)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    LegendItem(color = Color(0xFF00E676), label = "便签")
-                    LegendItem(color = Color(0xFF8E2DE2), label = "拍照")
-                    LegendItem(color = Color(0xFF00C9FF), label = "截屏")
-                    LegendItem(color = Color(0xFFFFB300), label = "卡路里")
+                    LegendItem(color = Color(0xFF8E2DE2), label = "便签")
+                    LegendItem(color = Color(0xFF00C9FF), label = "拍照")
+                    LegendItem(color = Color(0xFFFFB300), label = "截屏")
+                    LegendItem(color = Color(0xFF00E676), label = "卡路里")
+                    LegendItem(color = Color(0xFF11998E), label = "菜谱")
                 }
             }
         }
@@ -81,17 +82,33 @@ private fun HeatmapGrid(stats: List<DailySourceCount>) {
         val cellSize = 12.dp.toPx()
         val cellGap = 3.dp.toPx()
         val cellTotal = cellSize + cellGap
-        val todayWeek = today.get(Calendar.WEEK_OF_YEAR)
+
+        // Find the Sunday of 12 weeks ago to start drawing
+        val startCal = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+            
+            // Go to the Sunday of the current week
+            val daysToSubtract = get(Calendar.DAY_OF_WEEK) - Calendar.SUNDAY
+            add(Calendar.DAY_OF_YEAR, -daysToSubtract)
+            
+            // Go back 12 weeks to get the Sunday of 12 weeks ago (first column)
+            add(Calendar.WEEK_OF_YEAR, -(weeks - 1))
+        }
+
+        // Clone the start calendar for iteration
+        val drawCal = startCal.clone() as Calendar
 
         for (week in 0 until weeks) {
             for (day in 0 until 7) {
-                val cal = Calendar.getInstance().apply {
-                    set(Calendar.WEEK_OF_YEAR, todayWeek - (weeks - 1 - week))
-                    set(Calendar.DAY_OF_WEEK, day + 1)
+                if (drawCal.after(today)) {
+                    drawCal.add(Calendar.DAY_OF_YEAR, 1)
+                    continue
                 }
-                if (cal.after(today)) continue
 
-                val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(cal.time)
+                val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(drawCal.time)
                 val color = dateColorMap[dateStr] ?: Color(0x1AFFFFFF)
 
                 drawRoundRect(
@@ -100,6 +117,9 @@ private fun HeatmapGrid(stats: List<DailySourceCount>) {
                     size = Size(cellSize, cellSize),
                     cornerRadius = CornerRadius(2.dp.toPx())
                 )
+                
+                // Move to the next day
+                drawCal.add(Calendar.DAY_OF_YEAR, 1)
             }
         }
     }
@@ -136,6 +156,7 @@ private fun buildDateColorMap(stats: List<DailySourceCount>): Map<String, Color>
         }
         val baseColor = when (dominant?.sourceType) {
             "CALORIE" -> Color(0xFF00E676)
+            "RECIPE" -> Color(0xFF11998E)
             "TEXT" -> Color(0xFF8E2DE2)
             "PHOTO" -> Color(0xFF00C9FF)
             "SCREENSHOT" -> Color(0xFFFFB300)

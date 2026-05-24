@@ -20,9 +20,12 @@ class MainActivity : ComponentActivity() {
     private val recordIdToShow = mutableStateOf<Long?>(null)
     // P0: Quick Capture 触发状态
     private val showQuickCapture = mutableStateOf(false)
+    private var initialQuickCaptureText by mutableStateOf("")
 
     companion object {
         const val ACTION_SHOW_QUICK_CAPTURE = "com.example.awaassistant.SHOW_QUICK_CAPTURE"
+        const val ACTION_SHOW_QUICK_CAPTURE_WITH_TEXT = "com.example.awaassistant.SHOW_QUICK_CAPTURE_WITH_TEXT"
+        const val EXTRA_INITIAL_TEXT = "extra_initial_text"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -46,7 +49,11 @@ class MainActivity : ComponentActivity() {
                     MainNavigation(
                         recordIdToShow = recordIdToShow.value,
                         showQuickCapture = showQuickCapture.value,
-                        onQuickCaptureDismissed = { showQuickCapture.value = false }
+                        initialQuickCaptureText = initialQuickCaptureText,
+                        onQuickCaptureDismissed = {
+                            showQuickCapture.value = false
+                            initialQuickCaptureText = ""
+                        }
                     )
                 }
             }
@@ -62,6 +69,10 @@ class MainActivity : ComponentActivity() {
     private fun handleIntent(intent: Intent?) {
         when {
             intent?.action == ACTION_SHOW_QUICK_CAPTURE -> {
+                showQuickCapture.value = true
+            }
+            intent?.action == ACTION_SHOW_QUICK_CAPTURE_WITH_TEXT -> {
+                initialQuickCaptureText = intent.getStringExtra(EXTRA_INITIAL_TEXT) ?: ""
                 showQuickCapture.value = true
             }
             intent?.hasExtra("open_record_id") == true -> {

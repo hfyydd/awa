@@ -1,6 +1,7 @@
 package com.example.awaassistant.ui.dashboard
 
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -26,6 +27,10 @@ class HomeSharedViewModel(
     private val dao: AppDao
 ) : ViewModel() {
 
+    companion object {
+        private const val TAG = "HomeSharedViewModel"
+    }
+
     private val _memoryCapsule = MutableStateFlow<MemoryCapsule?>(null)
     val memoryCapsule: StateFlow<MemoryCapsule?> = _memoryCapsule.asStateFlow()
 
@@ -38,13 +43,19 @@ class HomeSharedViewModel(
     private val _statsLoading = MutableStateFlow(true)
     val statsLoading: StateFlow<Boolean> = _statsLoading.asStateFlow()
 
-    private var _initialized = false
+    init {
+        Log.d(TAG, "Initializing HomeSharedViewModel and collecting captures flow...")
+        viewModelScope.launch {
+            dao.getAllCapturesFlow().collect { captures ->
+                Log.d(TAG, "getAllCapturesFlow emitted: size=${captures.size}. Reloading capsule & stats...")
+                loadAll()
+            }
+        }
+    }
 
-    /** 全量初始化（只在首次Pager显示时调用一次） */
+    /** 全量初始化（保留方法用于兼容，实际由 init 块中 Flow 驱动自动更新） */
     fun initialize() {
-        if (_initialized) return
-        _initialized = true
-        loadAll()
+        Log.d(TAG, "initialize() called (no-op)")
     }
 
     private fun loadAll() {
@@ -64,21 +75,27 @@ class HomeSharedViewModel(
                     val windows = listOf(
                         3L to 7L,
                         7L to 30L,
-                        30L to 365L
+                        30L to 365L,
+                        0L to 3L // 增加 0-3 天兜底，保证测试或初始使用时时光胶囊不为空
                     )
+                    Log.d(TAG, "loadMemoryCapsule: now=$now")
                     for ((fromDays, toDays) in windows) {
                         val toTs = now - dayMs * fromDays
                         val fromTs = now - dayMs * toDays
+                        Log.d(TAG, "Searching capsule in window: $fromDays to $toDays days ago. range=[$fromTs, $toTs)")
                         val record = dao.getRandomRecordInRange(fromTs, toTs)
                         if (record != null) {
                             val daysAgo = ((now - record.timestamp) / dayMs).toInt()
+                            Log.d(TAG, "Found memory capsule candidate: id=${record.id}, title=${record.title}, daysAgo=$daysAgo")
                             _memoryCapsule.value = MemoryCapsule(record, daysAgo, labelOf(daysAgo))
                             _capsuleLoading.value = false
                             return@withContext
                         }
                     }
+                    Log.d(TAG, "No memory capsule candidate found in any window.")
                     _memoryCapsule.value = null
                 } catch (e: Exception) {
+                    Log.e(TAG, "Error loading memory capsule", e)
                     _memoryCapsule.value = null
                 }
             }
@@ -92,8 +109,12 @@ class HomeSharedViewModel(
             withContext(Dispatchers.IO) {
                 try {
                     val threeMonthsAgo = System.currentTimeMillis() - 90L * 24 * 60 * 60 * 1000
-                    _activityStats.value = dao.getActivityStats(threeMonthsAgo)
+                    Log.d(TAG, "loadActivityStats: threeMonthsAgo=$threeMonthsAgo")
+                    val stats = dao.getActivityStats(threeMonthsAgo)
+                    Log.d(TAG, "Loaded activity stats: size=${stats.size}, data=$stats")
+                    _activityStats.value = stats
                 } catch (e: Exception) {
+                    Log.e(TAG, "Error loading activity stats", e)
                     _activityStats.value = emptyList()
                 }
             }
@@ -102,6 +123,8 @@ class HomeSharedViewModel(
     }
 
     private fun labelOf(daysAgo: Int): String = when {
+        daysAgo == 0 -> "今日的灵感"
+        daysAgo <= 2 -> "最近的思绪"
         daysAgo <= 7 -> "7天前的灵感"
         daysAgo <= 30 -> "30天前的回顾"
         daysAgo <= 365 -> "1年前的珍藏"
