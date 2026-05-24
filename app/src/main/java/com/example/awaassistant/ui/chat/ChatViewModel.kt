@@ -14,10 +14,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 data class ChatMessage(
-    val role: String, // "user" or "assistant"
+    val role: String,
     val content: String,
     val timestamp: Long = System.currentTimeMillis(),
-    val sources: List<CaptureRecord> = emptyList() // 引用的本地笔记来源
+    val sources: List<CaptureRecord> = emptyList()
 )
 
 class ChatViewModel(context: Context) : ViewModel() {
@@ -31,110 +31,99 @@ class ChatViewModel(context: Context) : ViewModel() {
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    /**
-     * 发送提问并运行本地 RAG 问答
-     */
     fun sendMessage(context: Context, queryText: String) {
         if (queryText.trim().isEmpty()) return
 
-        // 1. 立即展示用户消息
         val userMsg = ChatMessage(role = "user", content = queryText)
         _messages.value = _messages.value + userMsg
         _isLoading.value = true
 
         viewModelScope.launch {
             try {
-                // 2. 本地检索相关内容 (RAG Context)
                 val retrievedContext = retrieveLocalContext(queryText)
-
-                // 3. 构建历史对话记录格式给大模型
                 val history = _messages.value.drop(1).dropLast(0).map { msg ->
                     Pair(msg.role, msg.content)
                 }
-
-                // 4. 调用配置的国产/主流 LLM 接口
                 val aiResponse = OpenAiCompatibleClient.chatWithContext(
                     context = context,
                     query = queryText,
                     retrievedRecords = retrievedContext,
                     chatHistory = history
                 )
-
-                // 5. 展示 AI 回复
-                val aiMsg = ChatMessage(
-                    role = "assistant",
-                    content = aiResponse,
-                    sources = retrievedContext
-                )
+                val aiMsg = ChatMessage(role = "assistant", content = aiResponse, sources = retrievedContext)
                 _messages.value = _messages.value + aiMsg
             } catch (e: Exception) {
-                _messages.value = _messages.value + ChatMessage(
-                    role = "assistant",
-                    content = "抱歉，检索或生成回答时发生错误: ${e.message}"
-                )
+                _messages.value = _messages.value + ChatMessage(role = "assistant", content = "抱歉，检索或生成回答时发生错误: ${e.message}")
             } finally {
                 _isLoading.value = false
             }
         }
     }
 
-    /**
-     * 智能检索本地文本
-     */
     private suspend fun retrieveLocalContext(query: String): List<CaptureRecord> {
-        // 清理搜索词，过滤无用标点
-        val cleanedQuery = query.replace(Regex("[.,?，。？!]"), " ").trim()
-        if (cleanedQuery.isEmpty()) return emptyList()
-
         val results = mutableListOf<CaptureRecord>()
-
-        // 1. 如果是“时效性”或“针对记录/截图的通用泛指”查询，直接把最近的 3 条记录加到候选列表中
         val q = query.trim()
-        val recencyKeywords = listOf("刚才", "刚刚", "最近", "最新", "上一个", "上一张", "上条", "上一条", "刚", "最新的一张", "最后一张", "最后一篇", "上一次", "前一个", "前一张")
-        val generalKeywords = listOf("截图", "截屏", "图片", "照片", "笔记", "记录", "东西", "画面", "屏幕", "历史")
+        val allRecords = dao.getAllCaptures()
         
-        val hasRecency = recencyKeywords.any { q.contains(it) }
-        val hasGeneral = generalKeywords.any { q.contains(it) }
+        // 1. 时效性/序号类查询
+        val recencyPatterns = listOf(
+            "最后一张", "最后一篇", "最新一张", "最新一个", "上一个", "上一张", "上一条", 
+            "刚才", "刚刚", "最近", "最新", "刚", "上一次", "前一个", "前一张",
+            "我刚才", "我刚刚", "我最近", "我上一个", "我上一张", "我上一条"
+        )
+        val hasRecency = recencyPatterns.any { q.contains(it) }
         
-        if (hasRecency || (hasGeneral && q.length < 8)) {
-            val allRecent = dao.getAllCaptures()
-            results.addAll(allRecent.take(3))
+        // 2. 截图类查询 → 过滤 SCREENSHOT 记录
+        val screenshotPatterns = listOf(
+            "截图", "截屏", "屏幕截图", "刚才截的", "刚刚截的", "最后一张截图",
+            "最后截的", "上一张截图", "上一截", "屏幕内容", "屏幕上的"
+        )
+        val hasScreenshot = screenshotPatterns.any { q.contains(it) }
+        
+        if (hasScreenshot) {
+            val screenshots = allRecords.filter { it.sourceType == "SCREENSHOT" }.take(3)
+            results.addAll(screenshots)
         }
-
-        // 2. 尝试使用 FTS MATCH 全文搜索。将搜索词用空格分割并加上 * 支持模糊前缀
-        val terms = cleanedQuery.split(Regex("\\s+")).filter { it.isNotEmpty() }
-        val ftsQuery = terms.joinToString(" AND ") { "$it*" }
         
-        val ftsResults = try {
-            dao.searchCaptures(ftsQuery)
-        } catch (e: Exception) {
-            Log.e("ChatViewModel", "FTS search failed, fallback to manual filters", e)
-            emptyList()
+        if (hasRecency && results.isEmpty()) {
+            results.addAll(allRecords.take(3))
         }
         
-        // 合并 FTS 结果，并对候选去重
-        for (record in ftsResults) {
-            if (results.none { it.id == record.id }) {
-                results.add(record)
-            }
-        }
-
-        // 3. 如果还是没有匹配结果，且非时效性查询，降级使用传统数据库的模糊查询 (LIKE) 遍历匹配
-        if (results.isEmpty()) {
-            val allRecords = dao.getAllCaptures()
-            val likeResults = allRecords.filter { record ->
-                terms.any { term ->
-                    record.title.contains(term, ignoreCase = true) ||
-                    record.summary.contains(term, ignoreCase = true) ||
-                    record.rawContent.contains(term, ignoreCase = true) ||
-                    record.tags.contains(term, ignoreCase = true)
+        // 3. 搜索词提取
+        val searchTerms = q
+            .replace(Regex("[.,?，。？！、…~@#\$%^&()（）【】《》\"']"), " ")
+            .split(Regex("\\s+"))
+            .filter { it.length >= 2 && it !in listOf("什么", "哪个", "怎么", "如何", "为什么", "是不是", "可以", "帮我", "我想", "我要") }
+        
+        if (searchTerms.isNotEmpty()) {
+            val ftsQuery = searchTerms.joinToString(" AND ") { "$it*" }
+            try {
+                val ftsResults = dao.searchCaptures(ftsQuery)
+                for (record in ftsResults) {
+                    if (results.none { it.id == record.id }) {
+                        results.add(record)
+                    }
                 }
+            } catch (_: Exception) {}
+            
+            if (results.isEmpty()) {
+                val likeResults = allRecords.filter { record ->
+                    searchTerms.any { term ->
+                        record.title.contains(term, ignoreCase = true) ||
+                        record.summary.contains(term, ignoreCase = true) ||
+                        record.rawContent.contains(term, ignoreCase = true) ||
+                        record.tags.contains(term, ignoreCase = true)
+                    }
+                }
+                results.addAll(likeResults)
             }
-            results.addAll(likeResults)
         }
-
-        // 对最终数据按照时间戳降序重排，取前 5 条相关记录注入上下文
-        return results.distinctBy { it.id }.sortedByDescending { it.timestamp }.take(5)
+        
+        if (results.isEmpty()) {
+            results.addAll(allRecords.take(3))
+        }
+        
+        return results.distinctBy { it.id }.take(5)
     }
 
     fun clearHistory() {

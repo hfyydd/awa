@@ -22,6 +22,7 @@ import com.example.awaassistant.data.AnalysisResult
 import com.example.awaassistant.util.ChineseConverter
 import com.example.awaassistant.util.LocalOcrHelper
 import com.example.awaassistant.util.ReminderScheduler
+import com.example.awaassistant.widget.WidgetRefreshWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -659,6 +660,13 @@ class AwaAccessibilityService : AccessibilityService() {
             }
         } catch (e: Throwable) {
             Log.e(TAG, "Failed to show completion toast", e)
+        }
+
+        // 刷新桌面小组件
+        try {
+            WidgetRefreshWorker.triggerNow(this@AwaAccessibilityService)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to trigger widget refresh", e)
         }
     }
 }

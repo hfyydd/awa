@@ -5,7 +5,7 @@ import androidx.work.*
 import java.util.concurrent.TimeUnit
 
 /**
- * 每日凌晨刷新小组件内容
+ * 小组件刷新 Worker
  */
 class WidgetRefreshWorker(
     context: Context,
@@ -14,7 +14,6 @@ class WidgetRefreshWorker(
 
     override fun doWork(): Result {
         return try {
-            // 通知所有小组件刷新
             MemoryWidget.triggerRefresh(applicationContext)
             Result.success()
         } catch (e: Exception) {
@@ -31,7 +30,6 @@ class WidgetRefreshWorker(
                 .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
                 .build()
 
-            // 计算距离凌晨的时间
             val now = java.util.Calendar.getInstance()
             val deadline = java.util.Calendar.getInstance().apply {
                 set(java.util.Calendar.HOUR_OF_DAY, 0)
@@ -56,11 +54,16 @@ class WidgetRefreshWorker(
             )
         }
 
-        /** 触发立即刷新 */
+        /** 触发立即刷新（所有保存路径统一调用） */
         fun triggerNow(context: Context) {
-            WorkManager.getInstance(context).enqueue(
-                OneTimeWorkRequestBuilder<WidgetRefreshWorker>().build()
-            )
+            try {
+                WorkManager.getInstance(context).enqueue(
+                    OneTimeWorkRequestBuilder<WidgetRefreshWorker>().build()
+                )
+            } catch (e: Exception) {
+                // 降级：直接同步刷新
+                MemoryWidget.triggerRefresh(context)
+            }
         }
     }
 }
