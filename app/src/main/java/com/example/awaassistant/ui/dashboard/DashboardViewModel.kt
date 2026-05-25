@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -32,9 +33,29 @@ class DashboardViewModel(context: Context) : ViewModel() {
     private val db = AppDatabase.getDatabase(context.applicationContext)
     private val dao = db.appDao()
 
-    // 屏幕捕获历史记录 Flow
-    val captureRecords: StateFlow<List<CaptureRecord>> = dao.getAllCapturesFlow()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    fun updateSearchQuery(query: String) {
+        _searchQuery.value = query
+    }
+
+    // 屏幕捕获历史记录 Flow（集成实时搜索过滤逻辑）
+    val captureRecords: StateFlow<List<CaptureRecord>> = combine(
+        dao.getAllCapturesFlow(),
+        _searchQuery
+    ) { records, query ->
+        if (query.isBlank()) {
+            records
+        } else {
+            records.filter { record ->
+                record.title.contains(query, ignoreCase = true) ||
+                record.summary.contains(query, ignoreCase = true) ||
+                record.rawContent.contains(query, ignoreCase = true) ||
+                record.tags.contains(query, ignoreCase = true)
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // 活跃状态的提醒 Flow
     val activeReminders: StateFlow<List<ReminderItem>> = dao.getActiveRemindersFlow()
@@ -329,13 +350,17 @@ class DashboardViewModel(context: Context) : ViewModel() {
             if (noteText.trim().isEmpty()) return@launch
             val firstLine = noteText.trim().split("\n").firstOrNull() ?: ""
             val cleanTitle = if (firstLine.length > 15) firstLine.take(15) + "..." else firstLine.ifEmpty { "快捷便签" }
+            
+            val inlineTags = com.example.awaassistant.util.TagHelper.extractInlineTags(noteText)
+            val finalTags = if (inlineTags.isEmpty()) "快速录入" else inlineTags.distinct().joinToString(",")
+
             val record = CaptureRecord(
                 title = cleanTitle,
                 summary = noteText,
                 rawContent = noteText,
                 imagePath = null,
                 timestamp = System.currentTimeMillis(),
-                tags = "快速录入",
+                tags = finalTags,
                 sourceType = "TEXT"
             )
             dao.insertCapture(record)
@@ -353,13 +378,16 @@ class DashboardViewModel(context: Context) : ViewModel() {
                 val firstLine = noteText.trim().split("\n").firstOrNull() ?: ""
                 val cleanTitle = if (firstLine.length > 15) firstLine.take(15) + "..." else firstLine.ifEmpty { "快捷便签" }
 
+                val inlineTags = com.example.awaassistant.util.TagHelper.extractInlineTags(noteText)
+                val finalTags = (listOf("便签") + inlineTags).distinct().joinToString(",")
+
                 val newRecord = CaptureRecord(
                     title = cleanTitle,
                     summary = noteText,
                     rawContent = noteText,
                     imagePath = null,
                     timestamp = System.currentTimeMillis(),
-                    tags = "便签,未分析",
+                    tags = finalTags,
                     sourceType = "TEXT"
                 )
                 dao.insertCapture(newRecord)

@@ -7,9 +7,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.awaassistant.data.AppDao
 import com.example.awaassistant.data.AppDatabase
-import com.example.awaassistant.data.CaptureRecord
-import com.example.awaassistant.data.DailySourceCount
-import com.example.awaassistant.ui.detail.MemoryCapsule
+import com.example.awaassistant.data.CapsuleData
+import com.example.awaassistant.data.TimeCapsuleEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -31,17 +30,19 @@ class HomeSharedViewModel(
         private const val TAG = "HomeSharedViewModel"
     }
 
-    private val _memoryCapsule = MutableStateFlow<MemoryCapsule?>(null)
-    val memoryCapsule: StateFlow<MemoryCapsule?> = _memoryCapsule.asStateFlow()
+    private val _memoryCapsule = MutableStateFlow<CapsuleData?>(null)
+    val memoryCapsule: StateFlow<CapsuleData?> = _memoryCapsule.asStateFlow()
 
-    private val _activityStats = MutableStateFlow<List<DailySourceCount>>(emptyList())
-    val activityStats: StateFlow<List<DailySourceCount>> = _activityStats.asStateFlow()
+    private val _activityStats = MutableStateFlow<List<com.example.awaassistant.data.DailySourceCount>>(emptyList())
+    val activityStats: StateFlow<List<com.example.awaassistant.data.DailySourceCount>> = _activityStats.asStateFlow()
 
     private val _capsuleLoading = MutableStateFlow(true)
     val capsuleLoading: StateFlow<Boolean> = _capsuleLoading.asStateFlow()
 
     private val _statsLoading = MutableStateFlow(true)
     val statsLoading: StateFlow<Boolean> = _statsLoading.asStateFlow()
+
+    private val capsuleEngine = TimeCapsuleEngine(dao)
 
     init {
         Log.d(TAG, "Initializing HomeSharedViewModel and collecting captures flow...")
@@ -68,36 +69,14 @@ class HomeSharedViewModel(
     private fun loadMemoryCapsule() {
         viewModelScope.launch {
             _capsuleLoading.value = true
-            withContext(Dispatchers.IO) {
-                try {
-                    val now = System.currentTimeMillis()
-                    val dayMs = 86400000L
-                    val windows = listOf(
-                        3L to 7L,
-                        7L to 30L,
-                        30L to 365L,
-                        0L to 3L // 增加 0-3 天兜底，保证测试或初始使用时时光胶囊不为空
-                    )
-                    Log.d(TAG, "loadMemoryCapsule: now=$now")
-                    for ((fromDays, toDays) in windows) {
-                        val toTs = now - dayMs * fromDays
-                        val fromTs = now - dayMs * toDays
-                        Log.d(TAG, "Searching capsule in window: $fromDays to $toDays days ago. range=[$fromTs, $toTs)")
-                        val record = dao.getRandomRecordInRange(fromTs, toTs)
-                        if (record != null) {
-                            val daysAgo = ((now - record.timestamp) / dayMs).toInt()
-                            Log.d(TAG, "Found memory capsule candidate: id=${record.id}, title=${record.title}, daysAgo=$daysAgo")
-                            _memoryCapsule.value = MemoryCapsule(record, daysAgo, labelOf(daysAgo))
-                            _capsuleLoading.value = false
-                            return@withContext
-                        }
-                    }
-                    Log.d(TAG, "No memory capsule candidate found in any window.")
-                    _memoryCapsule.value = null
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error loading memory capsule", e)
-                    _memoryCapsule.value = null
+            try {
+                val capsule = withContext(Dispatchers.IO) {
+                    capsuleEngine.loadCapsule()
                 }
+                _memoryCapsule.value = capsule
+            } catch (e: Exception) {
+                Log.e(TAG, "Error loading memory capsule", e)
+                _memoryCapsule.value = null
             }
             _capsuleLoading.value = false
         }
@@ -120,15 +99,6 @@ class HomeSharedViewModel(
             }
             _statsLoading.value = false
         }
-    }
-
-    private fun labelOf(daysAgo: Int): String = when {
-        daysAgo == 0 -> "今日的灵感"
-        daysAgo <= 2 -> "最近的思绪"
-        daysAgo <= 7 -> "7天前的灵感"
-        daysAgo <= 30 -> "30天前的回顾"
-        daysAgo <= 365 -> "1年前的珍藏"
-        else -> "旧日时光"
     }
 
     class Factory(private val context: Context) : ViewModelProvider.Factory {

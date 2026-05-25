@@ -33,13 +33,16 @@ class QuickCaptureViewModel(
         viewModelScope.launch {
             _isSaving.value = true
             try {
+                val inlineTags = com.example.awaassistant.util.TagHelper.extractInlineTags(content)
+                val finalTags = if (inlineTags.isEmpty()) "快速录入" else inlineTags.distinct().joinToString(",")
+                
                 val record = CaptureRecord(
                     title = content.take(50).replace("\n", " "),
                     summary = content,
                     rawContent = content,
                     imagePath = null,
                     timestamp = System.currentTimeMillis(),
-                    tags = "快速录入",
+                    tags = finalTags,
                     sourceType = "TEXT",
                     isCompleted = false
                 )

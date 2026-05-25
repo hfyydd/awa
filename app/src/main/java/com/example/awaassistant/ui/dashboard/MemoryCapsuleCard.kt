@@ -17,7 +17,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import com.example.awaassistant.ui.detail.MemoryCapsule
+import com.example.awaassistant.data.CapsuleData
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -28,7 +28,7 @@ import java.util.Locale
  */
 @Composable
 fun MemoryCapsuleCard(
-    capsule: MemoryCapsule?,
+    capsule: CapsuleData?,
     isLoading: Boolean,
     onViewDetail: (Long) -> Unit,
     onRefresh: () -> Unit,
@@ -65,7 +65,7 @@ fun MemoryCapsuleCard(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(text = "✨", fontSize = 14.sp)
+                        Text(text = currentCapsule.emoji, fontSize = 14.sp)
                         Text(
                             text = currentCapsule.label,
                             fontSize = 13.sp,

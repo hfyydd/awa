@@ -17,9 +17,6 @@ class NoteDetailViewModel(private val dao: AppDao) : ViewModel() {
     private val _relatedRecords = MutableStateFlow<List<CaptureRecord>>(emptyList())
     val relatedRecords: StateFlow<List<CaptureRecord>> = _relatedRecords.asStateFlow()
 
-    private val _memoryCapsule = MutableStateFlow<MemoryCapsule?>(null)
-    val memoryCapsule: StateFlow<MemoryCapsule?> = _memoryCapsule.asStateFlow()
-
     // P1: 加载关联旧思绪（基于 FTS 全文检索）
     fun loadRelatedRecords(record: CaptureRecord) {
         viewModelScope.launch {
@@ -35,35 +32,6 @@ class NoteDetailViewModel(private val dao: AppDao) : ViewModel() {
             } else {
                 _relatedRecords.value = emptyList()
             }
-        }
-    }
-
-    // P1: 加载时光胶囊
-    fun loadMemoryCapsule() {
-        viewModelScope.launch {
-            val now = System.currentTimeMillis()
-            val dayMs = 86400000L
-
-            val windows = listOf(
-                7L to "7天前的灵感",
-                30L to "30天前的回顾",
-                365L to "1年前的珍藏"
-            )
-
-            for ((days, label) in windows) {
-                val toTs = now - dayMs * (days - 1)
-                val fromTs = now - dayMs * days
-                val candidate = dao.getRandomRecordInRange(fromTs, toTs)
-                if (candidate != null) {
-                    _memoryCapsule.value = MemoryCapsule(
-                        record = candidate,
-                        daysAgo = days.toInt(),
-                        label = label
-                    )
-                    return@launch
-                }
-            }
-            _memoryCapsule.value = null
         }
     }
 
@@ -134,10 +102,3 @@ class NoteDetailViewModel(private val dao: AppDao) : ViewModel() {
         )
     }
 }
-
-// P1: 时光胶囊数据结构
-data class MemoryCapsule(
-    val record: CaptureRecord,
-    val daysAgo: Int,
-    val label: String
-)

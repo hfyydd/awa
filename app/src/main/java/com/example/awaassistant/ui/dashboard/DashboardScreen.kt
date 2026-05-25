@@ -40,6 +40,7 @@ fun DashboardScreen(
 ) {
     val context = LocalContext.current
     val records by viewModel.captureRecords.collectAsStateWithLifecycle()
+    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
 
     var showNoteDialog by remember { mutableStateOf(false) }
     var noteInputText by remember { mutableStateOf("") }
@@ -120,13 +121,58 @@ fun DashboardScreen(
                 contentPadding = PaddingValues(top = 8.dp, bottom = 80.dp)
             ) {
                 item(span = StaggeredGridItemSpan.FullLine) {
-                    Text(
-                        text = "全部记录",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        modifier = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 4.dp)
-                    )
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.padding(bottom = 8.dp, top = 4.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { viewModel.updateSearchQuery(it) },
+                            placeholder = { Text("搜索标题、内容或标签...", color = Color.Gray, fontSize = 13.sp) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp),
+                            singleLine = true,
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = "搜索",
+                                    tint = Color.LightGray,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            },
+                            trailingIcon = {
+                                if (searchQuery.isNotEmpty()) {
+                                    IconButton(onClick = { viewModel.updateSearchQuery("") }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Clear,
+                                            contentDescription = "清空",
+                                            tint = Color.LightGray,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                            },
+                            shape = RoundedCornerShape(24.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = Color(0x1FFFFFFF),
+                                unfocusedContainerColor = Color(0x0DFFFFFF),
+                                focusedBorderColor = Color(0xFF8E2DE2),
+                                unfocusedBorderColor = Color(0x1AFFFFFF),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                cursorColor = Color(0xFF8E2DE2)
+                            )
+                        )
+
+                        Text(
+                            text = if (searchQuery.isEmpty()) "全部记录" else "搜索结果",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            modifier = Modifier.padding(start = 4.dp, end = 4.dp, top = 4.dp)
+                        )
+                    }
                 }
 
                 if (records.isEmpty()) {

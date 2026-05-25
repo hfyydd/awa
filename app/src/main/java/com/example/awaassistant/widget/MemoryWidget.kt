@@ -10,10 +10,12 @@ import android.widget.RemoteViews
 import com.example.awaassistant.MainActivity
 import com.example.awaassistant.R
 import com.example.awaassistant.data.AppDatabase
+import com.example.awaassistant.data.TimeCapsuleEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -71,93 +73,49 @@ class MemoryWidget : AppWidgetProvider() {
             val manager = appWidgetManager ?: AppWidgetManager.getInstance(context)
 
             scope.launch {
-                val capsule = loadRandomCapsule(context)
+                val capsule = loadCapsule(context)
                 val views = buildRemoteViews(context, capsule)
 
-                with(Dispatchers.Main) {
+                withContext(Dispatchers.Main) {
                     manager.updateAppWidget(appWidgetId, views)
                 }
             }
         }
 
-        private suspend fun loadRandomCapsule(context: Context): CapsuleData? {
-            return try {
+        private suspend fun loadCapsule(context: Context) = withContext(Dispatchers.IO) {
+            try {
                 val db = AppDatabase.getDatabase(context)
-                val dao = db.appDao()
-                val now = System.currentTimeMillis()
-                val dayMs = 86400000L
-
-                // 从 3-7天、7-30天、30-365天、0-3天 窗口随机抽取
-                val windows = listOf(3L to 7L, 7L to 30L, 30L to 365L, 0L to 3L)
-
-                for ((fromDays, toDays) in windows) {
-                    val toTs = now - dayMs * fromDays
-                    val fromTs = now - dayMs * toDays
-                    val record = dao.getRandomRecordInRange(fromTs, toTs)
-                    if (record != null) {
-                        return@loadRandomCapsule CapsuleData(
-                            title = record.title,
-                            summary = cleanSummary(record.summary),
-                            daysAgo = ((now - record.timestamp) / dayMs).toInt(),
-                            recordId = record.id,
-                            timestamp = record.timestamp
-                        )
-                    }
-                }
-
-                // 备用：从所有历史记录中随机
-                val oneDayAgo = now - dayMs
-                val fallback = dao.getRandomHistoricalRecord(oneDayAgo)
-                fallback?.let {
-                    return@loadRandomCapsule CapsuleData(
-                        title = it.title,
-                        summary = cleanSummary(it.summary),
-                        daysAgo = ((now - it.timestamp) / dayMs).toInt(),
-                        recordId = it.id,
-                        timestamp = it.timestamp
-                    )
-                }
-                null
+                val engine = TimeCapsuleEngine(db.appDao())
+                engine.loadCapsule()
             } catch (e: Exception) {
                 null
             }
         }
 
-        private fun cleanSummary(text: String): String {
-            return text
-                .replace(Regex("[\\#\\*`\\-]"), "")
-                .replace(Regex("\\s+"), " ")
-                .trim()
-                .take(100)
-        }
-
-        private fun buildRemoteViews(context: Context, capsule: CapsuleData?): RemoteViews {
+        private fun buildRemoteViews(context: Context, capsule: com.example.awaassistant.data.CapsuleData?): RemoteViews {
             val views = RemoteViews(context.packageName, R.layout.widget_memory)
             val dateFmt = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
 
             if (capsule != null) {
-                views.setTextViewText(R.id.widget_title, capsule.title)
-                views.setTextViewText(R.id.widget_summary, capsule.summary)
-                views.setTextViewText(R.id.widget_days_ago, "${capsule.daysAgo}天前")
-                views.setTextViewText(R.id.widget_date, dateFmt.format(Date(capsule.timestamp)))
+                val cleanSummary = capsule.record.summary
+                    .replace(Regex("[\\#\\*`\\-]"), "")
+                    .replace(Regex("\\s+"), " ")
+                    .trim()
+                    .take(100)
 
-                val (label, emoji) = when {
-                    capsule.daysAgo == 0 -> "今日的灵感" to "✨"
-                    capsule.daysAgo <= 2 -> "最近的思绪" to "🌱"
-                    capsule.daysAgo <= 7 -> "7天前的灵感" to "✨"
-                    capsule.daysAgo <= 30 -> "30天前的回顾" to "📅"
-                    capsule.daysAgo <= 365 -> "1年前的珍藏" to "🏆"
-                    else -> "旧日时光" to "💫"
-                }
-                views.setTextViewText(R.id.widget_label, label)
-                views.setTextViewText(R.id.widget_emoji, emoji)
+                views.setTextViewText(R.id.widget_title, capsule.record.title)
+                views.setTextViewText(R.id.widget_summary, cleanSummary)
+                views.setTextViewText(R.id.widget_days_ago, "${capsule.daysAgo}天前")
+                views.setTextViewText(R.id.widget_date, dateFmt.format(Date(capsule.record.timestamp)))
+                views.setTextViewText(R.id.widget_label, capsule.label)
+                views.setTextViewText(R.id.widget_emoji, capsule.emoji)
 
                 val intent = Intent(context, MainActivity::class.java).apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                    putExtra("open_record_id", capsule.recordId)
+                    putExtra("open_record_id", capsule.record.id)
                 }
                 val pendingIntent = PendingIntent.getActivity(
-                    context, capsule.recordId.toInt(), intent,
+                    context, capsule.record.id.toInt(), intent,
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
                 views.setOnClickPendingIntent(R.id.widget_root, pendingIntent)
@@ -183,12 +141,3 @@ class MemoryWidget : AppWidgetProvider() {
         }
     }
 }
-
-/** 小组件数据结构 */
-private data class CapsuleData(
-    val title: String,
-    val summary: String,
-    val daysAgo: Int,
-    val recordId: Long,
-    val timestamp: Long
-)

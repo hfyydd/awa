@@ -37,6 +37,9 @@ import com.example.awaassistant.data.ReminderItem
 import com.example.awaassistant.data.OpenAiCompatibleClient
 import com.example.awaassistant.util.ReminderScheduler
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
@@ -78,6 +81,11 @@ fun NoteDetailScreen(
     var showRawText by remember { mutableStateOf(false) }
     var isAiAnalyzing by remember { mutableStateOf(false) }
 
+    var isEditing by remember { mutableStateOf(false) }
+    var editTitle by remember { mutableStateOf("") }
+    var editSummary by remember { mutableStateOf("") }
+    var editTags by remember { mutableStateOf("") }
+
     LaunchedEffect(recordId) {
         isLoading = true
         record = dao.getCaptureById(recordId)
@@ -93,10 +101,78 @@ fun NoteDetailScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(record?.title ?: "记录详情", fontWeight = FontWeight.Bold, color = Color.White) },
+                title = {
+                    if (isEditing) {
+                        OutlinedTextField(
+                            value = editTitle,
+                            onValueChange = { editTitle = it },
+                            singleLine = true,
+                            placeholder = { Text("输入标题...", color = Color.Gray, fontSize = 15.sp) },
+                            textStyle = androidx.compose.ui.text.TextStyle(
+                                color = Color.White,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(end = 8.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF8E2DE2),
+                                unfocusedBorderColor = Color.Transparent,
+                                cursorColor = Color(0xFF8E2DE2),
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent
+                            )
+                        )
+                    } else {
+                        Text(record?.title ?: "记录详情", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "返回", tint = Color.White)
+                    }
+                },
+                actions = {
+                    if (record != null) {
+                        if (isEditing) {
+                            IconButton(onClick = {
+                                if (editSummary.isNotBlank()) {
+                                    scope.launch(Dispatchers.IO) {
+                                        val mergedTags = com.example.awaassistant.util.TagHelper.mergeTags(editTags, editSummary)
+                                        val updatedRecord = record!!.copy(
+                                            title = editTitle.ifBlank { "未命名记录" },
+                                            summary = editSummary,
+                                            tags = mergedTags
+                                        )
+                                        dao.updateCapture(updatedRecord)
+                                        withContext(Dispatchers.Main) {
+                                            record = updatedRecord
+                                            isEditing = false
+                                            Toast.makeText(context, "已保存修改 ✨", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                } else {
+                                    Toast.makeText(context, "正文内容不能为空", Toast.LENGTH_SHORT).show()
+                                }
+                            }) {
+                                Icon(Icons.Default.Check, contentDescription = "保存", tint = Color.White)
+                            }
+                            IconButton(onClick = {
+                                isEditing = false
+                            }) {
+                                Icon(Icons.Default.Close, contentDescription = "取消", tint = Color.White)
+                            }
+                        } else {
+                            IconButton(onClick = {
+                                editTitle = record!!.title
+                                editSummary = record!!.summary
+                                editTags = record!!.tags
+                                isEditing = true
+                            }) {
+                                Icon(Icons.Default.Edit, contentDescription = "编辑", tint = Color.White)
+                            }
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF0F0C1B))
