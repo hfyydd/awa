@@ -125,12 +125,12 @@ object SettingsManager {
 
     fun getDefaultHomepage(context: Context): Int {
         val value = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getString(KEY_DEFAULT_HOMEPAGE, "QUICK") ?: "QUICK"
+            .getString(KEY_DEFAULT_HOMEPAGE, "CHAT") ?: "CHAT"
         return when (value) {
             "CHAT" -> 0
-            "QUICK" -> 1
-            "DASHBOARD" -> 2
-            else -> 1
+            "DASHBOARD" -> 1
+            "QUICK" -> 2
+            else -> 0
         }
     }
 

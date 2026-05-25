@@ -94,7 +94,7 @@ fun MainPagerScreen(
                         .padding(4.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    listOf("问答", "快捷", "记录").forEachIndexed { index, title ->
+                    listOf("问答", "记录", "快捷").forEachIndexed { index, title ->
                         val selected = pagerState.currentPage == index
                         val bgColor by animateColorAsState(
                             targetValue = if (selected) Color(0xFF8E2DE2) else Color.Transparent,
@@ -148,17 +148,17 @@ fun MainPagerScreen(
                     onBack = {},
                     onNavigateToDetail = onNavigateToDetail
                 )
-                1 -> QuickActionsScreen(
-                    onNavigateToDetail = onNavigateToDetail,
-                    sharedViewModel = sharedViewModel,
-                    dashboardViewModel = dashboardViewModel
-                )
-                2 -> DashboardScreen(
+                1 -> DashboardScreen(
                     showTopBar = false,
                     onNavigateToChat = { coroutineScope.launch { pagerState.animateScrollToPage(0) } },
                     onNavigateToSettings = onNavigateToSettings,
                     onNavigateToDetail = onNavigateToDetail,
                     viewModel = dashboardViewModel
+                )
+                2 -> QuickActionsScreen(
+                    onNavigateToDetail = onNavigateToDetail,
+                    sharedViewModel = sharedViewModel,
+                    dashboardViewModel = dashboardViewModel
                 )
             }
         }

@@ -572,8 +572,8 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         val isChatSelected = defaultHomepage == "CHAT"
-                        val isQuickSelected = defaultHomepage == "QUICK"
                         val isDashboardSelected = defaultHomepage == "DASHBOARD"
+                        val isQuickSelected = defaultHomepage == "QUICK"
 
                         Button(
                             onClick = { defaultHomepage = "CHAT" },
@@ -589,19 +589,6 @@ fun SettingsScreen(
                         }
 
                         Button(
-                            onClick = { defaultHomepage = "QUICK" },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isQuickSelected) Color(0xFF8E2DE2) else Color(0x15FFFFFF),
-                                contentColor = if (isQuickSelected) Color.White else Color.LightGray
-                            ),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
-                        ) {
-                            Text("快捷", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-
-                        Button(
                             onClick = { defaultHomepage = "DASHBOARD" },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(8.dp),
@@ -612,6 +599,19 @@ fun SettingsScreen(
                             contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
                         ) {
                             Text("记录", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = { defaultHomepage = "QUICK" },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isQuickSelected) Color(0xFF8E2DE2) else Color(0x15FFFFFF),
+                                contentColor = if (isQuickSelected) Color.White else Color.LightGray
+                            ),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                        ) {
+                            Text("快捷", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
