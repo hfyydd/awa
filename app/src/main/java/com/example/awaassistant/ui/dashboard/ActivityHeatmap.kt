@@ -1,11 +1,14 @@
 package com.example.awaassistant.ui.dashboard
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -27,6 +30,63 @@ fun ActivityHeatmap(
     isLoading: Boolean,
     modifier: Modifier = Modifier
 ) {
+    var showExplanationDialog by remember { mutableStateOf(false) }
+
+    if (showExplanationDialog) {
+        AlertDialog(
+            onDismissRequest = { showExplanationDialog = false },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("🧠", fontSize = 18.sp)
+                    Text("什么是“思考足迹”？", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "“思考足迹”是您最近 18 周（约 4 个月）的个人成长与记录热力图，最右下角的方块代表今天。",
+                        color = Color.LightGray,
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp
+                    )
+                    HorizontalDivider(color = Color(0x1AFFFFFF))
+                    Text(
+                        "🎨 颜色分类（代表主记录类型）：\n" +
+                        "• 🟣 紫色：添加了文字便签\n" +
+                        "• 🔵 蓝色：拍摄了真实照片\n" +
+                        "• 🟡 橙色：导入了系统截屏\n" +
+                        "• 🟢 绿色：记录了卡路里饮食\n" +
+                        "• 🟢 青色：生成了食材菜谱",
+                        color = Color.LightGray,
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp
+                    )
+                    HorizontalDivider(color = Color(0x1AFFFFFF))
+                    Text(
+                        "✨ 亮度深浅（代表活跃度）：\n" +
+                        "格子颜色越深，说明当天记录的内容越多（活跃度越高）。灰色格子表示当天暂无记录。",
+                        color = Color.LightGray,
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { showExplanationDialog = false },
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFB388FF))
+                ) {
+                    Text("我知道了", fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = Color(0xFF151026),
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0x0CFFFFFF)),
@@ -38,10 +98,18 @@ fun ActivityHeatmap(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(text = "🧠", fontSize = 14.sp)
                 Text("思考足迹", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Icon(
+                    imageVector = Icons.Default.HelpOutline,
+                    contentDescription = "说明",
+                    tint = Color.Gray,
+                    modifier = Modifier
+                        .size(14.dp)
+                        .clickable { showExplanationDialog = true }
+                )
             }
 
             if (isLoading) {
