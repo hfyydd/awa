@@ -57,6 +57,7 @@ fun QuickActionsScreen(
     var tempPhotoPath by remember { mutableStateOf<String?>(null) }
     var tempPhotoUriString by remember { mutableStateOf<String?>(null) }
     var captureMode by remember { mutableStateOf("NOTE") }
+    var pendingCameraMode by remember { mutableStateOf<String?>(null) }
     var showCalorieOptionDialog by remember { mutableStateOf(false) }
 
     var showNoteDialog by remember { mutableStateOf(false) }
@@ -92,6 +93,47 @@ fun QuickActionsScreen(
                     else -> dashboardViewModel.processPhotoNote(context, uri, file)
                 }
             }
+        }
+    }
+
+    fun launchCameraForMode(mode: String) {
+        runCatching {
+            captureMode = mode
+            val pair = createTempPhotoFile(context)
+            tempPhotoPath = pair.first.absolutePath
+            tempPhotoUriString = pair.second.toString()
+            cameraLauncher.launch(pair.second)
+        }.onFailure { error ->
+            android.util.Log.e("QuickActionsScreen", "Failed to launch camera capture", error)
+            tempPhotoPath = null
+            tempPhotoUriString = null
+            android.widget.Toast.makeText(context, "无法启动相机，请检查相机权限", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        val mode = pendingCameraMode
+        pendingCameraMode = null
+        if (isGranted && mode != null) {
+            launchCameraForMode(mode)
+        } else {
+            android.widget.Toast.makeText(context, "未授权相机权限，无法拍照", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun requestOrLaunchCamera(mode: String) {
+        val hasCameraPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.CAMERA
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        if (hasCameraPermission) {
+            launchCameraForMode(mode)
+        } else {
+            pendingCameraMode = mode
+            cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
         }
     }
 
@@ -155,11 +197,7 @@ fun QuickActionsScreen(
                     icon = Icons.Default.CameraAlt,
                     gradientColors = listOf(Color(0xFF8E2DE2), Color(0xFF4A00E0)),
                     onClick = {
-                        captureMode = "NOTE"
-                        val pair = createTempPhotoFile(context)
-                        tempPhotoPath = pair.first.absolutePath
-                        tempPhotoUriString = pair.second.toString()
-                        cameraLauncher.launch(pair.second)
+                        requestOrLaunchCamera("NOTE")
                     },
                     modifier = Modifier.weight(1f)
                 )
@@ -274,11 +312,7 @@ fun QuickActionsScreen(
                 Button(
                     onClick = {
                         showCalorieOptionDialog = false
-                        captureMode = "CALORIE"
-                        val pair = createTempPhotoFile(context)
-                        tempPhotoPath = pair.first.absolutePath
-                        tempPhotoUriString = pair.second.toString()
-                        cameraLauncher.launch(pair.second)
+                        requestOrLaunchCamera("CALORIE")
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
                     shape = RoundedCornerShape(20.dp)
@@ -435,6 +469,8 @@ private fun NoteInputDialog(
 
 private fun createTempPhotoFile(context: Context): Pair<File, Uri> {
     val tempFile = File(context.cacheDir, "camera_temp_${System.currentTimeMillis()}.jpg")
+    tempFile.parentFile?.mkdirs()
+    tempFile.createNewFile()
     val uri = androidx.core.content.FileProvider.getUriForFile(
         context, "com.example.awaassistant.provider", tempFile
     )
