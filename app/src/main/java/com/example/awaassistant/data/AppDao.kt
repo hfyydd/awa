@@ -103,6 +103,29 @@ interface AppDao {
 
     @Query("SELECT * FROM reminder_items WHERE isActive = 1 AND isTriggered = 0 ORDER BY reminderTime ASC")
     suspend fun getActiveReminders(): List<ReminderItem>
+
+    // --- 聊天记录操作 ---
+
+    @Query("SELECT * FROM chat_sessions ORDER BY lastUpdated DESC")
+    suspend fun getAllChatSessions(): List<ChatSession>
+
+    @Query("SELECT * FROM chat_messages WHERE sessionId = :sessionId ORDER BY timestamp ASC")
+    suspend fun getMessagesForSession(sessionId: Long): List<ChatMessageEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertChatSession(session: ChatSession): Long
+
+    @Update
+    suspend fun updateChatSession(session: ChatSession)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertChatMessage(message: ChatMessageEntity): Long
+
+    @Query("DELETE FROM chat_sessions WHERE id = :sessionId")
+    suspend fun deleteChatSession(sessionId: Long)
+
+    @Query("DELETE FROM chat_messages WHERE sessionId = :sessionId")
+    suspend fun deleteMessagesForSession(sessionId: Long)
 }
 
 // P2: 热力图统计数据结构

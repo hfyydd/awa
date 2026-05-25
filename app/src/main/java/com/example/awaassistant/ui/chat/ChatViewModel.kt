@@ -47,6 +47,74 @@ class ChatViewModel(context: Context) : ViewModel() {
     private val _isAttachmentLoading = MutableStateFlow(false)
     val isAttachmentLoading: StateFlow<Boolean> = _isAttachmentLoading.asStateFlow()
 
+    private val _currentSessionId = MutableStateFlow<Long?>(null)
+    val currentSessionId: StateFlow<Long?> = _currentSessionId.asStateFlow()
+
+    private val _currentSessionTitle = MutableStateFlow<String>("新对话")
+    val currentSessionTitle: StateFlow<String> = _currentSessionTitle.asStateFlow()
+
+    private val _sessions = MutableStateFlow<List<com.example.awaassistant.data.ChatSession>>(emptyList())
+    val sessions: StateFlow<List<com.example.awaassistant.data.ChatSession>> = _sessions.asStateFlow()
+
+    init {
+        loadSessionsAndLatest()
+    }
+
+    private fun loadSessionsAndLatest() {
+        viewModelScope.launch {
+            val allSessions = dao.getAllChatSessions()
+            _sessions.value = allSessions
+            if (allSessions.isNotEmpty()) {
+                selectSession(allSessions.first().id)
+            } else {
+                startNewSession()
+            }
+        }
+    }
+
+    fun selectSession(sessionId: Long) {
+        viewModelScope.launch {
+            val session = dao.getAllChatSessions().find { it.id == sessionId } ?: return@launch
+            _currentSessionId.value = session.id
+            _currentSessionTitle.value = session.title
+
+            val dbMsgs = dao.getMessagesForSession(sessionId)
+            val mappedMsgs = dbMsgs.map { dbMsg ->
+                val attachedRecord = dbMsg.attachedRecordId?.let { dao.getCaptureById(it) }
+                ChatMessage(
+                    role = dbMsg.role,
+                    content = dbMsg.content,
+                    timestamp = dbMsg.timestamp,
+                    sources = if (attachedRecord != null) listOf(attachedRecord) else emptyList()
+                )
+            }
+            _messages.value = mappedMsgs
+        }
+    }
+
+    fun startNewSession() {
+        _currentSessionId.value = null
+        _currentSessionTitle.value = "新对话"
+        _messages.value = emptyList()
+    }
+
+    fun deleteSession(sessionId: Long) {
+        viewModelScope.launch {
+            dao.deleteChatSession(sessionId)
+            dao.deleteMessagesForSession(sessionId)
+            val allSessions = dao.getAllChatSessions()
+            _sessions.value = allSessions
+
+            if (_currentSessionId.value == sessionId) {
+                if (allSessions.isNotEmpty()) {
+                    selectSession(allSessions.first().id)
+                } else {
+                    startNewSession()
+                }
+            }
+        }
+    }
+
     fun clearAttachment() {
         _attachment.value = null
     }
@@ -154,6 +222,17 @@ class ChatViewModel(context: Context) : ViewModel() {
 
         viewModelScope.launch {
             try {
+                // Ensure we have an active session
+                var sId = _currentSessionId.value
+                if (sId == null) {
+                    val title = if (queryText.length > 15) queryText.take(15) + "..." else queryText
+                    val newSession = com.example.awaassistant.data.ChatSession(title = title, lastUpdated = System.currentTimeMillis())
+                    sId = dao.insertChatSession(newSession)
+                    _currentSessionId.value = sId
+                    _currentSessionTitle.value = title
+                    _sessions.value = dao.getAllChatSessions()
+                }
+
                 var attachedRecord: CaptureRecord? = null
                 if (currentAtt != null) {
                     when (currentAtt) {
@@ -187,6 +266,16 @@ class ChatViewModel(context: Context) : ViewModel() {
                     }
                 }
 
+                // Save user message to database
+                val userMsgEntity = com.example.awaassistant.data.ChatMessageEntity(
+                    sessionId = sId,
+                    role = "user",
+                    content = queryText,
+                    timestamp = userMsg.timestamp,
+                    attachedRecordId = attachedRecord?.id
+                )
+                dao.insertChatMessage(userMsgEntity)
+
                 // Update the user message to contain the attachedRecord in its sources for rendering
                 if (attachedRecord != null) {
                     val currentList = _messages.value.toMutableList()
@@ -211,7 +300,16 @@ class ChatViewModel(context: Context) : ViewModel() {
                 // Check API Key
                 val apiKey = SettingsManager.getApiKey(context)
                 if (apiKey.isEmpty()) {
-                    _messages.value = _messages.value + ChatMessage(role = "assistant", content = "请先去设置页面配置您的 API Key。", sources = finalContext)
+                    val fallbackResponse = "请先去设置页面配置您的 API Key。"
+                    _messages.value = _messages.value + ChatMessage(role = "assistant", content = fallbackResponse, sources = finalContext)
+                    
+                    val errorMsgEntity = com.example.awaassistant.data.ChatMessageEntity(
+                        sessionId = sId,
+                        role = "assistant",
+                        content = fallbackResponse,
+                        timestamp = System.currentTimeMillis()
+                    )
+                    dao.insertChatMessage(errorMsgEntity)
                     _isLoading.value = false
                     return@launch
                 }
@@ -235,8 +333,38 @@ class ChatViewModel(context: Context) : ViewModel() {
                         _messages.value = currentList
                     }
                 }
+
+                // Save assistant message to database after streaming completes
+                val assistantMsgEntity = com.example.awaassistant.data.ChatMessageEntity(
+                    sessionId = sId,
+                    role = "assistant",
+                    content = accumulatedContent,
+                    timestamp = System.currentTimeMillis()
+                )
+                dao.insertChatMessage(assistantMsgEntity)
+
+                // Update session time
+                val currentSession = dao.getAllChatSessions().find { it.id == sId }
+                if (currentSession != null) {
+                    dao.updateChatSession(currentSession.copy(lastUpdated = System.currentTimeMillis()))
+                }
+                _sessions.value = dao.getAllChatSessions()
+
             } catch (e: Exception) {
-                _messages.value = _messages.value + ChatMessage(role = "assistant", content = "抱歉，检索或生成回答时发生错误: ${e.message}")
+                val errMsg = "抱歉，检索或生成回答时发生错误: ${e.message}"
+                _messages.value = _messages.value + ChatMessage(role = "assistant", content = errMsg)
+                
+                val sId = _currentSessionId.value
+                if (sId != null) {
+                    dao.insertChatMessage(
+                        com.example.awaassistant.data.ChatMessageEntity(
+                            sessionId = sId,
+                            role = "assistant",
+                            content = errMsg,
+                            timestamp = System.currentTimeMillis()
+                        )
+                    )
+                }
             } finally {
                 _isLoading.value = false
             }
@@ -310,7 +438,15 @@ class ChatViewModel(context: Context) : ViewModel() {
     }
 
     fun clearHistory() {
-        _messages.value = emptyList()
+        val sId = _currentSessionId.value
+        if (sId != null) {
+            viewModelScope.launch {
+                dao.deleteChatSession(sId)
+                loadSessionsAndLatest()
+            }
+        } else {
+            startNewSession()
+        }
     }
 
     class Factory(private val context: Context) : ViewModelProvider.Factory {

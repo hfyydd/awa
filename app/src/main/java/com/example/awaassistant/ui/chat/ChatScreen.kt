@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.Image
 import androidx.compose.ui.res.painterResource
@@ -327,6 +328,141 @@ fun ChatScreen(
                     .fillMaxSize()
                     .padding(paddingValues)
             ) {
+                // Local Chat Control Header Bar
+                val currentSessionTitle by viewModel.currentSessionTitle.collectAsStateWithLifecycle()
+                var showHistorySheet by remember { mutableStateOf(false) }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    // Left: Glowing purple session title chip
+                    Box(
+                        modifier = Modifier
+                            .background(Color(0x1F8E2DE2), shape = RoundedCornerShape(16.dp))
+                            .border(1.dp, Color(0x338E2DE2), RoundedCornerShape(16.dp))
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .background(Color(0xFF8E2DE2), RoundedCornerShape(3.dp))
+                            )
+                            Text(
+                                text = currentSessionTitle,
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.widthIn(max = 120.dp)
+                            )
+                        }
+                    }
+
+                    // Right: Actions Row
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        // 1. History
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color(0x1AFFFFFF))
+                                .border(1.dp, Color(0x0EFFFFFF), RoundedCornerShape(14.dp))
+                                .clickable { showHistorySheet = true }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Description,
+                                    contentDescription = "历史对话",
+                                    tint = Color.LightGray,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text("历史", color = Color.LightGray, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+
+                        // 2. New Chat
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color(0x1AFFFFFF))
+                                .border(1.dp, Color(0x0EFFFFFF), RoundedCornerShape(14.dp))
+                                .clickable { viewModel.startNewSession() }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "新建对话",
+                                    tint = Color.LightGray,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text("新对话", color = Color.LightGray, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+
+                        // 3. Clear Current Chat
+                        if (messages.isNotEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(Color(0x11FF1744))
+                                    .border(1.dp, Color(0x1AFF1744), RoundedCornerShape(14.dp))
+                                    .clickable { viewModel.clearHistory() }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Clear,
+                                        contentDescription = "清空当前",
+                                        tint = Color(0xFFFF8A80),
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Text("清空", color = Color(0xFFFF8A80), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (showHistorySheet) {
+                    val sessions by viewModel.sessions.collectAsStateWithLifecycle()
+                    val currentSessionId by viewModel.currentSessionId.collectAsStateWithLifecycle()
+                    ChatHistoryBottomSheet(
+                        sessions = sessions,
+                        currentSessionId = currentSessionId,
+                        onDismiss = { showHistorySheet = false },
+                        onSelectSession = {
+                            viewModel.selectSession(it)
+                            showHistorySheet = false
+                        },
+                        onDeleteSession = {
+                            viewModel.deleteSession(it)
+                        }
+                    )
+                }
+
                 // Conversation Area / Onboarding empty state
                 if (messages.isEmpty()) {
                     Box(
@@ -355,7 +491,7 @@ fun ChatScreen(
                                 .fillMaxSize()
                                 .padding(horizontal = 16.dp),
                             verticalArrangement = Arrangement.spacedBy(16.dp),
-                            contentPadding = PaddingValues(top = 48.dp, bottom = 100.dp) // Leave top padding for the clear button
+                            contentPadding = PaddingValues(top = 8.dp, bottom = 100.dp)
                         ) {
                             items(messages) { message ->
                                 MessageBubble(
@@ -368,37 +504,6 @@ fun ChatScreen(
                                 item {
                                     ThinkingBubble()
                                 }
-                            }
-                        }
-
-                        // Localized Glassmorphic Clear Button
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(top = 8.dp, end = 16.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(Color(0x33000000))
-                                .border(1.dp, Color(0x1AFFFFFF), RoundedCornerShape(16.dp))
-                                .clickable { viewModel.clearHistory() }
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.ClearAll,
-                                    contentDescription = "清空对话",
-                                    tint = Color.LightGray,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Text(
-                                    text = "清空对话",
-                                    color = Color.LightGray,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
                             }
                         }
                     }
@@ -1323,6 +1428,100 @@ fun AttachmentPreviewBar(
                     tint = Color.LightGray,
                     modifier = Modifier.size(16.dp)
                 )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChatHistoryBottomSheet(
+    sessions: List<com.example.awaassistant.data.ChatSession>,
+    currentSessionId: Long?,
+    onDismiss: () -> Unit,
+    onSelectSession: (Long) -> Unit,
+    onDeleteSession: (Long) -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF191428)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "历史对话记录",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color.White
+            )
+
+            if (sessions.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(120.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("暂无历史对话", color = Color.Gray, fontSize = 13.sp)
+                }
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 300.dp)
+                ) {
+                    items(sessions) { session ->
+                        val isSelected = session.id == currentSessionId
+                        val dateStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(session.lastUpdated))
+                        
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isSelected) Color(0x338E2DE2) else Color(0x0CFFFFFF))
+                                .border(1.dp, if (isSelected) Color(0xFF8E2DE2) else Color.Transparent, RoundedCornerShape(12.dp))
+                                .clickable { onSelectSession(session.id) }
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = session.title,
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = dateStr,
+                                    color = Color.Gray,
+                                    fontSize = 10.sp,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
+                            }
+                            
+                            IconButton(
+                                onClick = { onDeleteSession(session.id) },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = "删除记录",
+                                    tint = if (isSelected) Color.White else Color.Gray,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }
