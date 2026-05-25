@@ -9,12 +9,15 @@ import android.util.Log
 import com.k2fsa.sherpa.onnx.*
 import kotlinx.coroutines.*
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 object AsrManager {
     private const val TAG = "AsrManager"
     private const val SAMPLE_RATE = 16000
+    private const val MODEL_ASSET_PATH = "sense_voice/model.int8.onnx"
+    private const val TOKENS_ASSET_PATH = "sense_voice/tokens.txt"
     
     private var recognizer: OfflineRecognizer? = null
     var isInitialized = false
@@ -28,20 +31,24 @@ object AsrManager {
 
     fun init(context: Context) {
         if (isInitialized) return
+        if (!hasRequiredAssets(context)) {
+            Log.w(TAG, "Skipping ASR initialization because required model assets are missing.")
+            return
+        }
         
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 Log.d(TAG, "Initializing Sherpa-ONNX SenseVoice OfflineRecognizer...")
                 
                 val senseVoiceConfig = OfflineSenseVoiceModelConfig(
-                    model = "sense_voice/model.int8.onnx",
+                    model = MODEL_ASSET_PATH,
                     language = "auto", // auto detect language
                     useInverseTextNormalization = true
                 )
                 
                 val modelConfig = OfflineModelConfig(
                     senseVoice = senseVoiceConfig,
-                    tokens = "sense_voice/tokens.txt",
+                    tokens = TOKENS_ASSET_PATH,
                     numThreads = 2,
                     debug = false
                 )
@@ -58,6 +65,19 @@ object AsrManager {
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to initialize OfflineRecognizer", e)
             }
+        }
+    }
+
+    private fun hasRequiredAssets(context: Context): Boolean {
+        return assetExists(context, MODEL_ASSET_PATH) && assetExists(context, TOKENS_ASSET_PATH)
+    }
+
+    private fun assetExists(context: Context, path: String): Boolean {
+        return try {
+            context.assets.open(path).use { true }
+        } catch (e: IOException) {
+            Log.w(TAG, "Missing ASR asset: $path")
+            false
         }
     }
 
