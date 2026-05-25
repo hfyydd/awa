@@ -1,6 +1,7 @@
 package com.example.awaassistant.ui.chat
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -9,10 +10,18 @@ import com.example.awaassistant.data.AppDatabase
 import com.example.awaassistant.data.CaptureRecord
 import com.example.awaassistant.data.OpenAiCompatibleClient
 import com.example.awaassistant.data.SettingsManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+
+sealed interface ChatAttachment {
+    data class Image(val uri: Uri, val name: String, val ocrText: String) : ChatAttachment
+    data class File(val uri: Uri, val name: String, val content: String) : ChatAttachment
+}
 
 data class ChatMessage(
     val role: String,
@@ -32,8 +41,112 @@ class ChatViewModel(context: Context) : ViewModel() {
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    private val _attachment = MutableStateFlow<ChatAttachment?>(null)
+    val attachment: StateFlow<ChatAttachment?> = _attachment.asStateFlow()
+
+    private val _isAttachmentLoading = MutableStateFlow(false)
+    val isAttachmentLoading: StateFlow<Boolean> = _isAttachmentLoading.asStateFlow()
+
+    fun clearAttachment() {
+        _attachment.value = null
+    }
+
+    fun selectImage(context: Context, uri: Uri) {
+        _isAttachmentLoading.value = true
+        _attachment.value = null
+        viewModelScope.launch {
+            try {
+                val name = getFileName(context, uri)
+                val ocrText = com.example.awaassistant.util.LocalOcrHelper.recognizeText(context, uri)
+                _attachment.value = ChatAttachment.Image(uri, name, ocrText)
+            } catch (e: Exception) {
+                Log.e("ChatViewModel", "OCR failed", e)
+                _attachment.value = ChatAttachment.Image(uri, "图片.jpg", "")
+            } finally {
+                _isAttachmentLoading.value = false
+            }
+        }
+    }
+
+    fun selectFile(context: Context, uri: Uri) {
+        _isAttachmentLoading.value = true
+        _attachment.value = null
+        viewModelScope.launch {
+            try {
+                val name = getFileName(context, uri)
+                val content = readFileContent(context, uri)
+                _attachment.value = ChatAttachment.File(uri, name, content)
+            } catch (e: Exception) {
+                Log.e("ChatViewModel", "File read failed", e)
+            } finally {
+                _isAttachmentLoading.value = false
+            }
+        }
+    }
+
+    private fun getFileName(context: Context, uri: Uri): String {
+        var result: String? = null
+        if (uri.scheme == "content") {
+            val cursor = context.contentResolver.query(uri, null, null, null, null)
+            cursor?.use {
+                if (it.moveToFirst()) {
+                    val index = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (index != -1) {
+                        result = it.getString(index)
+                    }
+                }
+            }
+        }
+        if (result == null) {
+            result = uri.path
+            val cut = result?.lastIndexOf('/') ?: -1
+            if (cut != -1) {
+                result = result?.substring(cut + 1)
+            }
+        }
+        return result ?: "file"
+    }
+
+    private fun readFileContent(context: Context, uri: Uri): String {
+        return try {
+            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                val bytes = ByteArray(10240) // 10KB max
+                val bytesRead = inputStream.read(bytes)
+                if (bytesRead > 0) {
+                    val content = String(bytes, 0, bytesRead, Charsets.UTF_8)
+                    if (content.contains('\u0000')) {
+                        "【注意：该文件似乎为二进制文件，无法提取纯文本内容】"
+                    } else {
+                        content
+                    }
+                } else {
+                    ""
+                }
+            } ?: ""
+        } catch (e: Exception) {
+            "读取文件失败: ${e.message}"
+        }
+    }
+
+    private suspend fun saveUriToPermanentStorage(context: Context, uri: Uri): File = withContext(Dispatchers.IO) {
+        val dir = File(context.filesDir, "photos")
+        if (!dir.exists()) {
+            dir.mkdirs()
+        }
+        val permanentFile = File(dir, "photo_${System.currentTimeMillis()}.jpg")
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            permanentFile.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        }
+        permanentFile
+    }
+
     fun sendMessage(context: Context, queryText: String) {
         if (queryText.trim().isEmpty()) return
+
+        val currentAtt = _attachment.value
+        _attachment.value = null // Clear attachment state immediately
 
         val userMsg = ChatMessage(role = "user", content = queryText)
         _messages.value = _messages.value + userMsg
@@ -41,7 +154,56 @@ class ChatViewModel(context: Context) : ViewModel() {
 
         viewModelScope.launch {
             try {
+                var attachedRecord: CaptureRecord? = null
+                if (currentAtt != null) {
+                    when (currentAtt) {
+                        is ChatAttachment.Image -> {
+                            val permanentFile = saveUriToPermanentStorage(context, currentAtt.uri)
+                            val record = CaptureRecord(
+                                title = "导入的图片",
+                                summary = "从聊天框导入的图片。\n\n[OCR 识别文字]\n${currentAtt.ocrText}",
+                                rawContent = currentAtt.ocrText,
+                                imagePath = permanentFile.absolutePath,
+                                timestamp = System.currentTimeMillis(),
+                                tags = "聊天导入",
+                                sourceType = "PHOTO"
+                            )
+                            val recordId = dao.insertCapture(record)
+                            attachedRecord = record.copy(id = recordId)
+                        }
+                        is ChatAttachment.File -> {
+                            val record = CaptureRecord(
+                                title = currentAtt.name,
+                                summary = "从聊天框导入的文件：${currentAtt.name}。\n\n[内容]\n${currentAtt.content}",
+                                rawContent = currentAtt.content,
+                                imagePath = null,
+                                timestamp = System.currentTimeMillis(),
+                                tags = "聊天导入",
+                                sourceType = "TEXT"
+                            )
+                            val recordId = dao.insertCapture(record)
+                            attachedRecord = record.copy(id = recordId)
+                        }
+                    }
+                }
+
+                // Update the user message to contain the attachedRecord in its sources for rendering
+                if (attachedRecord != null) {
+                    val currentList = _messages.value.toMutableList()
+                    val userMsgIndex = currentList.indexOfLast { it.role == "user" }
+                    if (userMsgIndex != -1) {
+                        currentList[userMsgIndex] = currentList[userMsgIndex].copy(sources = listOf(attachedRecord))
+                        _messages.value = currentList
+                    }
+                }
+
                 val retrievedContext = retrieveLocalContext(queryText)
+                val finalContext = if (attachedRecord != null) {
+                    listOf(attachedRecord) + retrievedContext.filter { it.id != attachedRecord.id }
+                } else {
+                    retrievedContext
+                }
+
                 val history = _messages.value.dropLast(1).map { msg ->
                     Pair(msg.role, msg.content)
                 }
@@ -49,13 +211,13 @@ class ChatViewModel(context: Context) : ViewModel() {
                 // Check API Key
                 val apiKey = SettingsManager.getApiKey(context)
                 if (apiKey.isEmpty()) {
-                    _messages.value = _messages.value + ChatMessage(role = "assistant", content = "请先去设置页面配置您的 API Key。", sources = retrievedContext)
+                    _messages.value = _messages.value + ChatMessage(role = "assistant", content = "请先去设置页面配置您的 API Key。", sources = finalContext)
                     _isLoading.value = false
                     return@launch
                 }
 
                 // Add empty placeholder
-                val initialAssistantMsg = ChatMessage(role = "assistant", content = "", sources = retrievedContext)
+                val initialAssistantMsg = ChatMessage(role = "assistant", content = "", sources = finalContext)
                 _messages.value = _messages.value + initialAssistantMsg
                 val assistantMsgIndex = _messages.value.size - 1
 
@@ -63,7 +225,7 @@ class ChatViewModel(context: Context) : ViewModel() {
                 OpenAiCompatibleClient.chatWithContextStream(
                     context = context,
                     query = queryText,
-                    retrievedRecords = retrievedContext,
+                    retrievedRecords = finalContext,
                     chatHistory = history
                 ).collect { chunk ->
                     accumulatedContent += chunk

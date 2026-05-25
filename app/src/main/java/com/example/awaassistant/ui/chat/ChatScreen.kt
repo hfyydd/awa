@@ -1,6 +1,9 @@
 package com.example.awaassistant.ui.chat
 
 import android.content.Context
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -23,6 +26,8 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.Image
 import androidx.compose.ui.res.painterResource
@@ -224,6 +229,21 @@ fun ChatScreen(
     val coroutineScope = rememberCoroutineScope()
     var inputText by remember { mutableStateOf("") }
 
+    val attachment by viewModel.attachment.collectAsStateWithLifecycle()
+    val isAttachmentLoading by viewModel.isAttachmentLoading.collectAsStateWithLifecycle()
+
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { viewModel.selectImage(context, it) }
+    }
+
+    val fileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { viewModel.selectFile(context, it) }
+    }
+
     // Auto-scroll to bottom on list update
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
@@ -385,13 +405,23 @@ fun ChatScreen(
                 }
 
                 // Floating Input Bar Area
-                Box(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 12.dp)
                         .navigationBarsPadding()
-                        .imePadding()
+                        .imePadding(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    if (isAttachmentLoading) {
+                        AttachmentLoadingBar()
+                    } else if (attachment != null) {
+                        AttachmentPreviewBar(
+                            attachment = attachment!!,
+                            onClear = { viewModel.clearAttachment() }
+                        )
+                    }
+
                     InputCapsule(
                         text = inputText,
                         onTextChange = { inputText = it },
@@ -400,7 +430,9 @@ fun ChatScreen(
                                 viewModel.sendMessage(context, inputText)
                                 inputText = ""
                             }
-                        }
+                        },
+                        onSelectImage = { galleryLauncher.launch("image/*") },
+                        onSelectFile = { fileLauncher.launch("*/*") }
                     )
                 }
             }
@@ -557,6 +589,47 @@ fun MessageBubble(
                         fontSize = 14.sp,
                         lineHeight = 20.sp
                     )
+
+                    if (message.sources.isNotEmpty()) {
+                        val record = message.sources.first()
+                        Spacer(modifier = Modifier.height(8.dp))
+                        if (record.imagePath != null) {
+                            AsyncImage(
+                                model = record.imagePath,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(140.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(8.dp))
+                            )
+                        } else {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color(0x15FFFFFF), RoundedCornerShape(8.dp))
+                                    .border(1.dp, Color(0x15FFFFFF), RoundedCornerShape(8.dp))
+                                    .padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Description,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = record.title,
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
                 }
             }
         } else {
@@ -925,8 +998,12 @@ fun SourceChip(
 fun InputCapsule(
     text: String,
     onTextChange: (String) -> Unit,
-    onSend: () -> Unit
+    onSend: () -> Unit,
+    onSelectImage: () -> Unit,
+    onSelectFile: () -> Unit
 ) {
+    var showAttachmentMenu by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -943,20 +1020,43 @@ fun InputCapsule(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Left Accessory Plus Button
-        Box(
-            modifier = Modifier
-                .size(38.dp)
-                .background(Color(0x0EFFFFFF), RoundedCornerShape(19.dp))
-                .clickable { /* Attachments action */ },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Default.Add,
-                contentDescription = "添加",
-                tint = Color.LightGray,
-                modifier = Modifier.size(20.dp)
-            )
+        // Left Accessory Plus Button with DropdownMenu
+        Box {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .background(Color(0x0EFFFFFF), RoundedCornerShape(19.dp))
+                    .clickable { showAttachmentMenu = true },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = "添加附件",
+                    tint = Color.LightGray,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            DropdownMenu(
+                expanded = showAttachmentMenu,
+                onDismissRequest = { showAttachmentMenu = false },
+                modifier = Modifier.background(Color(0xFF1E1430))
+            ) {
+                DropdownMenuItem(
+                    text = { Text("📷 选择图片 (OCR 识别)", color = Color.White, fontSize = 13.sp) },
+                    onClick = {
+                        showAttachmentMenu = false
+                        onSelectImage()
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("📄 选择文本文件", color = Color.White, fontSize = 13.sp) },
+                    onClick = {
+                        showAttachmentMenu = false
+                        onSelectFile()
+                    }
+                )
+            }
         }
 
         // Inner TextField with custom decoration
@@ -1088,6 +1188,140 @@ fun ThinkingBubble() {
                         .size(5.dp)
                         .graphicsLayer(translationY = dot3)
                         .background(Color(0xFF4A00E0), RoundedCornerShape(2.5.dp))
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun AttachmentLoadingBar() {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0x1F000000)),
+        border = BorderStroke(1.dp, Color(0x1AFFFFFF)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            CircularProgressIndicator(
+                color = Color(0xFF8E2DE2),
+                modifier = Modifier.size(20.dp),
+                strokeWidth = 2.dp
+            )
+            Text(
+                text = "正在处理附件，请稍候...",
+                color = Color.LightGray,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+fun AttachmentPreviewBar(
+    attachment: ChatAttachment,
+    onClear: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0x1F000000)),
+        border = BorderStroke(1.dp, Color(0x1AFFFFFF)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                when (attachment) {
+                    is ChatAttachment.Image -> {
+                        AsyncImage(
+                            model = attachment.uri,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0x22FFFFFF))
+                        )
+                        Column {
+                            Text(
+                                text = attachment.name,
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            val wordCount = attachment.ocrText.length
+                            Text(
+                                text = if (wordCount > 0) "已识别出 $wordCount 字" else "未识别到文字",
+                                color = Color.LightGray,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                    is ChatAttachment.File -> {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(Color(0x1AFFFFFF), RoundedCornerShape(8.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Description,
+                                contentDescription = null,
+                                tint = Color(0xFF8E2DE2),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = attachment.name,
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            val wordCount = attachment.content.length
+                            Text(
+                                text = "已读取 $wordCount 字",
+                                color = Color.LightGray,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                }
+            }
+
+            IconButton(
+                onClick = onClear,
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Clear,
+                    contentDescription = "取消",
+                    tint = Color.LightGray,
+                    modifier = Modifier.size(16.dp)
                 )
             }
         }
