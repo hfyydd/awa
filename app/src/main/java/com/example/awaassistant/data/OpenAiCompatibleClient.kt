@@ -153,10 +153,17 @@ object OpenAiCompatibleClient {
     }
 
     /**
-     * 拍照分析卡路里 (支持 Vision 多模态及 OCR 降级逻辑)
+     * 拍照分析卡路里 (结合离线图像标签与 OCR 的本地识别 + 文本大模型分析模式)
      */
-    suspend fun analyzeCalorieImage(context: Context, imageFile: File, ocrText: String): AnalysisResult? = withContext(Dispatchers.IO) {
-        val (apiKey, baseUrl, model) = getVisionApiConfig(context)
+    suspend fun analyzeCalorieImage(
+        context: Context,
+        imageFile: File,
+        ocrText: String,
+        imageLabels: List<String>
+    ): AnalysisResult? = withContext(Dispatchers.IO) {
+        val apiKey = SettingsManager.getApiKey(context)
+        val baseUrl = SettingsManager.getBaseUrl(context)
+        val model = SettingsManager.getModelName(context)
 
         if (apiKey.isEmpty()) {
             Log.e(TAG, "API Key is empty, skipping Calorie analysis.")
@@ -164,53 +171,44 @@ object OpenAiCompatibleClient {
         }
 
         val currentTimeString = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+        val labelsString = if (imageLabels.isNotEmpty()) imageLabels.joinToString(", ") else "未识别到具体食物特征"
 
         val promptContent = """
             你是一个专业的营养师和健康管理助手。
-            【最核心指令】你必须先仔细观察并识别出图片中包含什么具体的菜品、食物或配料，然后再去计算/估算热量。严禁直接给出热量而不对食物进行识别描述！
+            请根据以下由手机本地离线图像识别模型和 OCR 文本检测出的结果，分析该食物（或餐食），估算其总热量、蛋白质、脂肪、碳水化合物的含量，并提供一些健康点评或饮食建议。
             当前系统时间是: $currentTimeString
+            
+            【手机本地离线图像分类结果】
+            $labelsString
+            
+            【提取到的图片内 OCR 文字】
+            ${ocrText.ifEmpty { "（未检测到明显文字）" }}
             
             请将整理好的结果以符合以下 JSON Schema 格式的 JSON 字符串返回：
             
             【JSON 格式要求】
             {
-              "title": "估算出来的食物名称（10字以内，比如'红烧肉盖饭'）",
-              "summary": "【识别出的食物/菜品】\\n- [食物描述及分量]\\n\\n【食材明细估算】\\n- 🍕 食材1 (约50g)：100 kcal\\n- 🥦 食材2 (约100g)：50 kcal\\n\\n【卡路里/营养成分估算】\\n- 总热量：约 150 kcal\\n- 蛋白质：约 5g\\n- 脂肪：约 2g\\n- 碳水化合物：约 20g\\n\\n【健康点评与建议】\\n- [专业营养建议与点评]",
+              "title": "估算出来的食物名称（10字以内，比如'红烧肉盖饭'，如果无法分析，则写'健康记录'）",
+              "summary": "【识别出的食物/菜品】\\n- [结合图像识别标签及文字描述菜品]\\n\\n【食材明细估算】\\n- 🍕 食材1 (约50g)：100 kcal\\n- 🥦 食材2 (约100g)：50 kcal\\n\\n【卡路里/营养成分估算】\\n- 总热量：约 150 kcal\\n- 蛋白质：约 5g\\n- 脂肪：约 2g\\n- 碳水化合物：约 20g\\n\\n【健康点评与建议】\\n- [专业营养建议与点评]",
               "tags": ["卡路里", "健康记录", "食物类别标签"], // 2 到 3 个描述性标签
               "reminders": [] // 保持为空列表 []
             }
 
             【整理要求】
-            1. 必须先识别后估算：必须先在【识别出的食物/菜品】区块中明确列出您在图片中看到了哪些菜/食物以及视觉依据，这样更能让用户信服。
-            2. 估算要合理：根据细致识别出的食物类别和估算分量进行科学的热量及三大营养素估算。蛋白质、脂肪、碳水化合物必须以“约 XXg”或类似的数字g格式输出，以便正则提取。
+            1. 必须先识别后估算：必须结合图像识别标签（如 Pizza, Salad, Rice 等）与 OCR 文本判断食物，先在【识别出的食物/菜品】区块中明确描述识别结果，这样更能让用户信服。
+            2. 估算要合理：根据食物类别和常见分量进行科学的热量及三大营养素估算。蛋白质、脂肪、碳水化合物必须以“约 XXg”或类似的数字g格式输出，以便正则提取。
             3. 结构规范：summary 字段必须是一个纯文本字符串（使用 \\n 进行换行，绝对不要输出为 JSON 对象），必须依次且完整地包含这四个主标题：`【识别出的食物/菜品】`、`【食材明细估算】`、`【卡路里/营养成分估算】`、`【健康点评与建议】`。
             4. 食材细分要求：必须在【食材明细估算】中，将识别出的主要食材和配料以带Emoji和单项卡路里的格式按行拆解（如 `- 🍚 米饭 (约150g)：174 kcal`）。
             5. 输出格式：直接输出纯 JSON 字符串，严禁包含任何 Markdown 格式包裹（如 ```json 等），保持输出极其简洁。
         """.trimIndent()
 
-        // 1. 尝试多模态请求 (Vision)
         try {
-            Log.d(TAG, "Attempting multimodal calorie analysis...")
-            val bytes = compressImageFile(imageFile)
-            val base64Image = Base64.encodeToString(bytes, Base64.NO_WRAP)
-
-            val userContent = JSONArray().apply {
-                put(JSONObject().apply {
-                    put("type", "text")
-                    put("text", promptContent)
-                })
-                put(JSONObject().apply {
-                    put("type", "image_url")
-                    put("image_url", JSONObject().apply {
-                        put("url", "data:image/jpeg;base64,$base64Image")
-                    })
-                })
-            }
+            Log.d(TAG, "Attempting text-only calorie analysis with offline image labels...")
 
             val messages = JSONArray().apply {
                 put(JSONObject().apply {
                     put("role", "user")
-                    put("content", userContent)
+                    put("content", promptContent)
                 })
             }
 
@@ -219,11 +217,6 @@ object OpenAiCompatibleClient {
                 put("messages", messages)
                 put("temperature", 0.3)
                 put("max_tokens", 1024)
-                if (model.contains("glm-4.6v")) {
-                    put("thinking", JSONObject().apply {
-                        put("type", "disabled")
-                    })
-                }
             }
 
             val requestBody = payload.toString().toRequestBody(JSON_MEDIA_TYPE)
@@ -240,7 +233,7 @@ object OpenAiCompatibleClient {
                 if (response.isSuccessful) {
                     val responseBody = response.body?.string()
                     if (responseBody != null) {
-                        Log.d(TAG, "Multimodal Calorie Response: $responseBody")
+                        Log.d(TAG, "Text-only Calorie Response: $responseBody")
                         val jsonResponse = JSONObject(responseBody)
                         val choices = jsonResponse.getJSONArray("choices")
                         if (choices.length() > 0) {
@@ -254,83 +247,11 @@ object OpenAiCompatibleClient {
                         }
                     }
                 } else {
-                    Log.w(TAG, "Multimodal request failed with code: ${response.code}. Falling back to text OCR...")
+                    Log.e(TAG, "Text-only calorie request failed with code: ${response.code}")
                 }
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Multimodal calorie analysis failed: ${e.message}. Falling back to text OCR...", e)
-        }
-
-        // 2. 降级为文本请求 (OCR)
-        try {
-            Log.d(TAG, "Falling back to text-only OCR calorie analysis...")
-            val fallbackPromptContent = """
-                你是一个专业的营养师和健康管理助手。由于多模态识别暂不可用，请根据以下从食物照片中提取出的 OCR 文字，识别该食物（或从文字中推断出的餐食），估算其总热量、蛋白质、脂肪、碳水化合物的含量，并提供一些健康点评或饮食建议。
-                当前系统时间是: $currentTimeString
-                
-                请将整理好的结果以符合以下 JSON Schema 格式的 JSON 字符串返回：
-                
-                【JSON 格式要求】
-                {
-                  "title": "估算出来的食物名称（10字以内，比如'红烧肉盖饭'，如果OCR文本无法分析，则写'健康记录'）",
-                  "summary": "【识别出的食物/菜品】\\n- [食物描述及分量]\\n\\n【食材明细估算】\\n- 🍕 食材1 (约50g)：100 kcal\\n\\n【卡路里/营养成分估算】\\n- 总热量：约 100 kcal\\n- 蛋白质：约 5g\\n- 脂肪：约 2g\\n- 碳水化合物：约 20g\\n\\n【健康点评与建议】\\n- [专业营养建议与点评]",
-                  "tags": ["卡路里", "健康记录"], 
-                  "reminders": []
-                }
-
-                【提取的 OCR 文字】
-                $ocrText
-
-                【整理要求】
-                1. 必须先识别后估算：必须先在【识别出的食物/菜品】区块中根据文字指出识别出来的菜/食物，这样更能让用户信服。
-                2. 食材细分要求：必须在【食材明细估算】中，将文字中推导出的主要食材和分量以带Emoji和单项卡路里的格式按行拆解（如 `- 🍚 米饭 (约150g)：174 kcal`）。
-                3. 结构规范：summary 字段必须是一个纯文本字符串（使用 \\n 进行换行，绝对不要输出为 JSON 对象），必须依次且完整地包含这四个主标题：`【识别出的食物/菜品】`、`【食材明细估算】`、`【卡路里/营养成分估算】`、`【健康点评与建议】`。
-                4. 估算合理：蛋白质、脂肪、碳水化合物必须以“约 XXg”或类似的数字g格式输出，以便正则提取。
-                5. 输出格式：直接输出纯 JSON 字符串，严禁包含任何 Markdown 格式包裹（如 ```json 等）。
-            """.trimIndent()
-
-            val messages = JSONArray().apply {
-                put(JSONObject().apply {
-                    put("role", "user")
-                    put("content", fallbackPromptContent)
-                })
-            }
-
-            val payload = JSONObject().apply {
-                put("model", model)
-                put("messages", messages)
-                put("temperature", 0.3)
-                put("max_tokens", 1024)
-            }
-
-            val requestBody = payload.toString().toRequestBody(JSON_MEDIA_TYPE)
-            val requestUrl = if (baseUrl.endsWith("/")) "${baseUrl}chat/completions" else "$baseUrl/chat/completions"
-
-            val request = Request.Builder()
-                .url(requestUrl)
-                .addHeader("Authorization", "Bearer $apiKey")
-                .addHeader("Content-Type", "application/json")
-                .post(requestBody)
-                .build()
-
-            httpClient.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    val responseBody = response.body?.string()
-                    if (responseBody != null) {
-                        Log.d(TAG, "OCR Calorie Response: $responseBody")
-                        val jsonResponse = JSONObject(responseBody)
-                        val choices = jsonResponse.getJSONArray("choices")
-                        if (choices.length() > 0) {
-                            val content = choices.getJSONObject(0)
-                                .getJSONObject("message")
-                                .getString("content")
-                            return@withContext parseAnalysisResult(content)
-                        }
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "OCR calorie analysis failed too", e)
+            Log.e(TAG, "Text-only calorie analysis failed: ${e.message}", e)
         }
 
         return@withContext null

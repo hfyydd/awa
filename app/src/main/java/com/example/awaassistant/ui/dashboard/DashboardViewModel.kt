@@ -179,15 +179,22 @@ class DashboardViewModel(context: Context) : ViewModel() {
             _isProcessingPhoto.value = true
             Toast.makeText(context, "开始识别食物并估算卡路里，请稍后...", Toast.LENGTH_SHORT).show()
             try {
-                // 1. 本地 OCR 提取中英文文字作为辅助/降级文本
+                // 1. 本地 OCR 提取中英文文字作为辅助文本
                 val ocrText = try {
                     LocalOcrHelper.recognizeText(context, photoUri)
                 } catch (e: Exception) {
                     ""
                 }
 
-                // 2. 调用大模型分析卡路里 (支持多模态 Vision 和 OCR 降级)
-                val result = OpenAiCompatibleClient.analyzeCalorieImage(context, imageFile, ocrText)
+                // 2. 本地图像分类识别 (离线模型)
+                val imageLabels = try {
+                    com.example.awaassistant.util.LocalImageLabelingHelper.labelImage(context, photoUri)
+                } catch (e: Exception) {
+                    emptyList()
+                }
+
+                // 3. 调用大模型分析卡路里 (离线标签 + 文本大模型模式)
+                val result = OpenAiCompatibleClient.analyzeCalorieImage(context, imageFile, ocrText, imageLabels)
 
                 val title: String
                 val summary: String
@@ -261,8 +268,15 @@ class DashboardViewModel(context: Context) : ViewModel() {
                     ""
                 }
 
-                // 3. AI 分析
-                val result = OpenAiCompatibleClient.analyzeCalorieImage(context, tempFile, ocrText)
+                // 3. 本地图像分类识别 (离线模型)
+                val imageLabels = try {
+                    com.example.awaassistant.util.LocalImageLabelingHelper.labelImage(context, photoUri)
+                } catch (e: Exception) {
+                    emptyList()
+                }
+
+                // 4. AI 分析
+                val result = OpenAiCompatibleClient.analyzeCalorieImage(context, tempFile, ocrText, imageLabels)
 
                 val title: String
                 val summary: String

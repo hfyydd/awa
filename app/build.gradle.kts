@@ -95,6 +95,7 @@ dependencies {
   // ML Kit Text Recognition for OCR
   implementation(libs.mlkit.text.recognition)
   implementation(libs.mlkit.text.recognition.chinese)
+  implementation(libs.mlkit.image.labeling)
 
   // Kotlinx Serialization JSON for Navigation3 type-safe arguments
   implementation(libs.kotlinx.serialization.json)
