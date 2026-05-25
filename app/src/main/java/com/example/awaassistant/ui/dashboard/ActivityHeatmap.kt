@@ -75,15 +75,19 @@ fun ActivityHeatmap(
 @Composable
 private fun HeatmapGrid(stats: List<DailySourceCount>) {
     val today = Calendar.getInstance()
-    val weeks = 13
+    val weeks = 18
     val dateColorMap = buildDateColorMap(stats)
 
-    Canvas(modifier = Modifier.fillMaxWidth().height(100.dp)) {
-        val cellSize = 12.dp.toPx()
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(weeks.toFloat() / 7f)
+    ) {
         val cellGap = 3.dp.toPx()
-        val cellTotal = cellSize + cellGap
+        val cellTotal = (size.width + cellGap) / weeks
+        val cellSize = cellTotal - cellGap
 
-        // Find the Sunday of 12 weeks ago to start drawing
+        // Find the Sunday of 17 weeks ago to start drawing
         val startCal = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0)
             set(Calendar.MINUTE, 0)
@@ -94,7 +98,7 @@ private fun HeatmapGrid(stats: List<DailySourceCount>) {
             val daysToSubtract = get(Calendar.DAY_OF_WEEK) - Calendar.SUNDAY
             add(Calendar.DAY_OF_YEAR, -daysToSubtract)
             
-            // Go back 12 weeks to get the Sunday of 12 weeks ago (first column)
+            // Go back 17 weeks to get the Sunday of 17 weeks ago (first column)
             add(Calendar.WEEK_OF_YEAR, -(weeks - 1))
         }
 
