@@ -206,7 +206,7 @@ class DashboardViewModel(context: Context) : ViewModel() {
                     tags = result.tags.joinToString(",")
                 } else {
                     title = "卡路里记录 (${SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date())})"
-                    summary = "（AI 分析失败，无法估算卡路里。请检查网络配置或尝试使用支持 Vision 的大模型）" + if (ocrText.isNotEmpty()) "\n\n提取到的文字信息：\n$ocrText" else ""
+                    summary = "（AI 分析失败，无法估算卡路里。请检查网络连接或 API 配置）" + if (ocrText.isNotEmpty()) "\n\n提取到的文字信息：\n$ocrText" else ""
                     tags = "健康记录,卡路里"
                 }
 
@@ -288,7 +288,7 @@ class DashboardViewModel(context: Context) : ViewModel() {
                     tags = result.tags.joinToString(",")
                 } else {
                     title = "卡路里记录 (${SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date())})"
-                    summary = "（AI 分析失败，无法估算卡路里。请检查网络配置或尝试使用支持 Vision 的大模型）" + if (ocrText.isNotEmpty()) "\n\n提取到的文字信息：\n$ocrText" else ""
+                    summary = "（AI 分析失败，无法估算卡路里。请检查网络连接或 API 配置）" + if (ocrText.isNotEmpty()) "\n\n提取到的文字信息：\n$ocrText" else ""
                     tags = "健康记录,卡路里"
                 }
 

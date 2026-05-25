@@ -216,7 +216,7 @@ object OpenAiCompatibleClient {
                 put("model", model)
                 put("messages", messages)
                 put("temperature", 0.3)
-                put("max_tokens", 1024)
+                put("max_tokens", 16384)
             }
 
             val requestBody = payload.toString().toRequestBody(JSON_MEDIA_TYPE)
@@ -321,7 +321,7 @@ object OpenAiCompatibleClient {
                 put("model", model)
                 put("messages", messages)
                 put("temperature", 0.3)
-                put("max_tokens", 1024)
+                put("max_tokens", 16384)
                 if (model.contains("glm-4.6v")) {
                     put("thinking", JSONObject().apply {
                         put("type", "disabled")
@@ -400,7 +400,7 @@ object OpenAiCompatibleClient {
                 put("model", model)
                 put("messages", messages)
                 put("temperature", 0.3)
-                put("max_tokens", 1024)
+                put("max_tokens", 16384)
             }
 
             val requestBody = payload.toString().toRequestBody(JSON_MEDIA_TYPE)
