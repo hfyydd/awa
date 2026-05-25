@@ -3,6 +3,7 @@ package com.example.awaassistant.ui.dashboard
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,24 +41,6 @@ fun StreamRecordCard(
     modifier: Modifier = Modifier
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
-
-    val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { dismissValue ->
-            when (dismissValue) {
-                SwipeToDismissBoxValue.StartToEnd -> {
-                    // 右滑 -> 标记完成
-                    onToggleComplete()
-                    false
-                }
-                SwipeToDismissBoxValue.EndToStart -> {
-                    // 左滑 -> 弹出确认对话框，不直接删除
-                    showDeleteDialog = true
-                    false
-                }
-                SwipeToDismissBoxValue.Settled -> false
-            }
-        }
-    )
 
     // 删除确认对话框
     if (showDeleteDialog) {
@@ -119,69 +102,12 @@ fun StreamRecordCard(
         )
     }
 
-    SwipeToDismissBox(
-        state = dismissState,
-        backgroundContent = {
-            val direction = dismissState.dismissDirection
-            val color by animateColorAsState(
-                targetValue = when (direction) {
-                    SwipeToDismissBoxValue.StartToEnd -> Color(0xFF00E676)
-                    SwipeToDismissBoxValue.EndToStart -> Color(0xFFFF5252)
-                    else -> Color.Transparent
-                },
-                label = "swipe_bg"
-            )
-            val icon = when (direction) {
-                SwipeToDismissBoxValue.StartToEnd -> Icons.Default.CheckCircle
-                SwipeToDismissBoxValue.EndToStart -> Icons.Default.Delete
-                else -> Icons.Default.Delete
-            }
-            val alignment = when (direction) {
-                SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart
-                SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd
-                else -> Alignment.Center
-            }
-            val label = when (direction) {
-                SwipeToDismissBoxValue.StartToEnd -> "标记完成"
-                SwipeToDismissBoxValue.EndToStart -> "删除"
-                else -> ""
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(color.copy(alpha = 0.2f)),
-                contentAlignment = alignment
-            ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = color,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = label,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = color
-                    )
-                }
-            }
-        },
-        modifier = modifier,
-        content = {
-            GlassRecordContent(
-                record = record,
-                onClick = onClick,
-                onToggleComplete = onToggleComplete
-            )
-        }
+    GlassRecordContent(
+        record = record,
+        onClick = onClick,
+        onToggleComplete = onToggleComplete,
+        onDeleteClick = { showDeleteDialog = true },
+        modifier = modifier
     )
 }
 
@@ -191,7 +117,9 @@ fun StreamRecordCard(
 private fun GlassRecordContent(
     record: CaptureRecord,
     onClick: () -> Unit,
-    onToggleComplete: () -> Unit
+    onToggleComplete: () -> Unit,
+    onDeleteClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val isCompleted = record.isCompleted
     val bgAlpha = if (isCompleted) 0.05f else 0.12f
@@ -200,7 +128,7 @@ private fun GlassRecordContent(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.Transparent),
         elevation = CardDefaults.cardElevation(0.dp),
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(
@@ -217,7 +145,7 @@ private fun GlassRecordContent(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // 顶部来源 Badge
+            // 顶部来源 Badge + 完成勾选
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -245,47 +173,44 @@ private fun GlassRecordContent(
                     )
                 }
 
+                // 圆形勾选圈/已完成状态
                 if (isCompleted) {
                     Icon(
                         Icons.Default.CheckCircle,
                         contentDescription = "已完成",
                         tint = Color(0xFF00E676),
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier
+                            .size(18.dp)
+                            .clickable { onToggleComplete() }
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(18.dp)
+                            .border(1.2.dp, Color.Gray.copy(alpha = 0.6f), RoundedCornerShape(9.dp))
+                            .clickable { onToggleComplete() }
                     )
                 }
             }
 
-            // 缩略图
+            // 缩略图 (不同 sourceType 使用不同高度)
             if (record.imagePath != null) {
+                val imageHeight = when (record.sourceType) {
+                    "SCREENSHOT" -> 160.dp
+                    "PHOTO" -> 130.dp
+                    "RECIPE" -> 120.dp
+                    else -> 110.dp
+                }
                 AsyncImage(
                     model = record.imagePath,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(100.dp)
+                        .height(imageHeight)
                         .clip(RoundedCornerShape(8.dp))
                         .background(Color.DarkGray)
                 )
-            } else if (record.sourceType != "CALORIE") {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(60.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(
-                            if (isCompleted) Color(0x1F00E676) else Color(0x1F8E2DE2)
-                        )
-                        .clickable { onToggleComplete() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Default.CheckCircle,
-                        contentDescription = "标记完成",
-                        tint = if (isCompleted) Color(0xFF00E676) else Color(0xFF8E2DE2).copy(alpha = 0.5f),
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
             }
 
             // 标题
@@ -346,38 +271,56 @@ private fun GlassRecordContent(
                 }
             }
 
-            // 底部：时间戳 + 标签
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.fillMaxWidth()
+            // 底部：时间戳 + 标签 + 删除按钮
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                val dateStr = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
-                    .format(Date(record.timestamp))
-                Badge(
-                    containerColor = Color(0x22FFFFFF),
-                    contentColor = Color.LightGray
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
-                    Text(dateStr, fontSize = 9.sp)
-                }
+                    val dateStr = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+                        .format(Date(record.timestamp))
+                    Badge(
+                        containerColor = Color(0x11FFFFFF),
+                        contentColor = Color.LightGray
+                    ) {
+                        Text(dateStr, fontSize = 8.sp)
+                    }
 
-                record.tags.split(",").take(2).forEach { tag ->
-                    val cleanTag = tag.trim()
-                    if (cleanTag.isNotEmpty() && cleanTag != "处理中") {
-                        val (tagBg, tagContent) = when (record.sourceType) {
-                            "CALORIE" -> Pair(Color(0x1F00E676), Color(0xFF00E676))
-                            "RECIPE" -> Pair(Color(0x1F11998E), Color(0xFF11998E))
-                            "SCREENSHOT" -> Pair(Color(0x1F00C9FF), Color(0xFF00C9FF))
-                            "PHOTO" -> Pair(Color(0x1F8E2DE2), Color(0xFF8E2DE2))
-                            else -> Pair(Color(0x1F8E2DE2), Color(0xFF8E2DE2))
-                        }
-                        Badge(
-                            containerColor = tagBg,
-                            contentColor = tagContent
-                        ) {
-                            Text(cleanTag, fontSize = 9.sp)
+                    record.tags.split(",").take(1).forEach { tag ->
+                        val cleanTag = tag.trim()
+                        if (cleanTag.isNotEmpty() && cleanTag != "处理中") {
+                            val (tagBg, tagContent) = when (record.sourceType) {
+                                "CALORIE" -> Pair(Color(0x1F00E676), Color(0xFF00E676))
+                                "RECIPE" -> Pair(Color(0x1F11998E), Color(0xFF11998E))
+                                "SCREENSHOT" -> Pair(Color(0x1F00C9FF), Color(0xFF00C9FF))
+                                "PHOTO" -> Pair(Color(0x1F8E2DE2), Color(0xFF8E2DE2))
+                                else -> Pair(Color(0x1F8E2DE2), Color(0xFF8E2DE2))
+                            }
+                            Badge(
+                                containerColor = tagBg,
+                                contentColor = tagContent
+                            ) {
+                                Text(cleanTag, fontSize = 8.sp)
+                            }
                         }
                     }
+                }
+
+                IconButton(
+                    onClick = onDeleteClick,
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "删除",
+                        tint = Color.LightGray.copy(alpha = 0.5f),
+                        modifier = Modifier.size(16.dp)
+                    )
                 }
             }
         }

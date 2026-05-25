@@ -126,14 +126,8 @@ fun MainPagerScreen(
 
                 Row(
                     modifier = Modifier.align(Alignment.CenterEnd),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (pagerState.currentPage == 0) {
-                        IconButton(onClick = { chatViewModel.clearHistory() }) {
-                            Icon(Icons.Default.ClearAll, "清空历史", tint = Color.LightGray)
-                        }
-                    }
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(Icons.Default.Settings, "设置", tint = Color.White)
                     }

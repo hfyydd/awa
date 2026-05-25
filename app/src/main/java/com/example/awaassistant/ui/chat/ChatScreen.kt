@@ -324,25 +324,61 @@ fun ChatScreen(
                         )
                     }
                 } else {
-                    LazyColumn(
-                        state = listState,
+                    Box(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp) // Generous bottom padding for input bar overlap
                     ) {
-                        items(messages) { message ->
-                            MessageBubble(
-                                message = message,
-                                onNavigateToDetail = onNavigateToDetail
-                            )
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            contentPadding = PaddingValues(top = 48.dp, bottom = 100.dp) // Leave top padding for the clear button
+                        ) {
+                            items(messages) { message ->
+                                MessageBubble(
+                                    message = message,
+                                    onNavigateToDetail = onNavigateToDetail
+                                )
+                            }
+
+                            if (isLoading) {
+                                item {
+                                    ThinkingBubble()
+                                }
+                            }
                         }
 
-                        if (isLoading) {
-                            item {
-                                ThinkingBubble()
+                        // Localized Glassmorphic Clear Button
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(top = 8.dp, end = 16.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color(0x33000000))
+                                .border(1.dp, Color(0x1AFFFFFF), RoundedCornerShape(16.dp))
+                                .clickable { viewModel.clearHistory() }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ClearAll,
+                                    contentDescription = "清空对话",
+                                    tint = Color.LightGray,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "清空对话",
+                                    color = Color.LightGray,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
                             }
                         }
                     }

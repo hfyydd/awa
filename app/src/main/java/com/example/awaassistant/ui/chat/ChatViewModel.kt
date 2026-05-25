@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.awaassistant.data.AppDatabase
 import com.example.awaassistant.data.CaptureRecord
 import com.example.awaassistant.data.OpenAiCompatibleClient
+import com.example.awaassistant.data.SettingsManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,17 +42,37 @@ class ChatViewModel(context: Context) : ViewModel() {
         viewModelScope.launch {
             try {
                 val retrievedContext = retrieveLocalContext(queryText)
-                val history = _messages.value.drop(1).dropLast(0).map { msg ->
+                val history = _messages.value.dropLast(1).map { msg ->
                     Pair(msg.role, msg.content)
                 }
-                val aiResponse = OpenAiCompatibleClient.chatWithContext(
+
+                // Check API Key
+                val apiKey = SettingsManager.getApiKey(context)
+                if (apiKey.isEmpty()) {
+                    _messages.value = _messages.value + ChatMessage(role = "assistant", content = "请先去设置页面配置您的 API Key。", sources = retrievedContext)
+                    _isLoading.value = false
+                    return@launch
+                }
+
+                // Add empty placeholder
+                val initialAssistantMsg = ChatMessage(role = "assistant", content = "", sources = retrievedContext)
+                _messages.value = _messages.value + initialAssistantMsg
+                val assistantMsgIndex = _messages.value.size - 1
+
+                var accumulatedContent = ""
+                OpenAiCompatibleClient.chatWithContextStream(
                     context = context,
                     query = queryText,
                     retrievedRecords = retrievedContext,
                     chatHistory = history
-                )
-                val aiMsg = ChatMessage(role = "assistant", content = aiResponse, sources = retrievedContext)
-                _messages.value = _messages.value + aiMsg
+                ).collect { chunk ->
+                    accumulatedContent += chunk
+                    val currentList = _messages.value.toMutableList()
+                    if (assistantMsgIndex < currentList.size) {
+                        currentList[assistantMsgIndex] = currentList[assistantMsgIndex].copy(content = accumulatedContent)
+                        _messages.value = currentList
+                    }
+                }
             } catch (e: Exception) {
                 _messages.value = _messages.value + ChatMessage(role = "assistant", content = "抱歉，检索或生成回答时发生错误: ${e.message}")
             } finally {

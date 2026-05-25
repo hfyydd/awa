@@ -5,6 +5,9 @@ import android.util.Base64
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -670,6 +673,154 @@ object OpenAiCompatibleClient {
 
         return@withContext "大模型未返回任何内容"
     }
+
+    /**
+     * 基于本地检索内容的 RAG 问答（流式返回）
+     */
+    fun chatWithContextStream(
+        context: Context,
+        query: String,
+        retrievedRecords: List<CaptureRecord>,
+        chatHistory: List<Pair<String, String>>
+    ): Flow<String> = flow {
+        val apiKey = SettingsManager.getApiKey(context)
+        val baseUrl = SettingsManager.getBaseUrl(context)
+        val model = SettingsManager.getModelName(context)
+
+        if (apiKey.isEmpty()) {
+            emit("请先去设置页面配置您的 API Key。")
+            return@flow
+        }
+
+        val currentTimeString = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+
+        // 构建上下文
+        val contextBuilder = StringBuilder()
+        if (retrievedRecords.isNotEmpty()) {
+            contextBuilder.append("<retrieved_context>\n")
+            contextBuilder.append("以下是本地检索到的相关笔记和屏幕截取记录，按照相关度排序（请优先根据这些内容，并结合记录的时间戳回答用户的问题）：\n\n")
+            retrievedRecords.forEachIndexed { index, record ->
+                val typeName = when (record.sourceType) {
+                    "SCREENSHOT" -> "屏幕截图"
+                    "PHOTO" -> "手拍笔记"
+                    "CALORIE" -> "健康卡路里记录"
+                    else -> "纯文本记录"
+                }
+                val timeStr = getFriendlyDateTime(record.timestamp)
+                contextBuilder.append("【文档 ${index + 1}】\n")
+                contextBuilder.append("记录时间: $timeStr\n")
+                contextBuilder.append("记录类型: $typeName\n")
+                contextBuilder.append("标题: ${record.title}\n")
+                contextBuilder.append("摘要: ${record.summary}\n")
+                contextBuilder.append("详细原文: ${record.rawContent}\n")
+                contextBuilder.append("标签: ${record.tags}\n")
+                contextBuilder.append("----------------------\n\n")
+            }
+            contextBuilder.append("</retrieved_context>")
+        } else {
+            contextBuilder.append("<retrieved_context>\n没有在本地检索到相关的笔记或截图记录。\n</retrieved_context>")
+        }
+
+        val systemPrompt = """
+            <system_role>
+            你是一个部署在用户手机端的个人智能 AI 助手，名为 Awa。你能够基于用户的屏幕截图 and 拍下的工作笔记（即下方提供的本地上下文数据）帮用户做回忆 and 检索。
+            </system_role>
+            
+            <current_environment>
+            当前系统时间: $currentTimeString
+            当前活跃页面: 智能对话页
+            </current_environment>
+            
+            $contextBuilder
+            
+            <generation_rules>
+            1. 事实性约束：有本地文档时优先根据文档回答。如果检索到的文档无法回答该问题，请明确告知用户：“在本地笔记中未检索到相关内容，基于我自身知识推测...”。
+            2. 引用约束：回答必须引用出处。如果你的回答引用了某个本地文档，请在句尾（标点符号前）以 `[Doc X]` 的格式作为文献引用标志（例如：“...根据[Doc 1]所示...”，其中 X 代表文档的序号，如 1 代表文档 1），不要使用任何其他格式的标记，且不要自己捏造不存在的文档序号。
+            3. 语气约束：回答要专业、精炼、富有逻辑，避免啰嗦。
+            4. 语言约束：使用简体中文回答。
+            </generation_rules>
+        """.trimIndent()
+
+        val messages = JSONArray().apply {
+            put(JSONObject().apply {
+                put("role", "system")
+                put("content", systemPrompt)
+            })
+            // 添加历史记录
+            chatHistory.forEach { (role, message) ->
+                put(JSONObject().apply {
+                    put("role", role)
+                    put("content", message)
+                })
+            }
+            // 添加当前提问
+            put(JSONObject().apply {
+                put("role", "user")
+                put("content", query)
+            })
+        }
+
+        val payload = JSONObject().apply {
+            put("model", model)
+            put("messages", messages)
+            put("temperature", 0.7)
+            put("stream", true)
+        }
+
+        val requestBody = payload.toString().toRequestBody(JSON_MEDIA_TYPE)
+        val requestUrl = if (baseUrl.endsWith("/")) "${baseUrl}chat/completions" else "$baseUrl/chat/completions"
+
+        val request = Request.Builder()
+            .url(requestUrl)
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
+            .post(requestBody)
+            .build()
+
+        try {
+            val response = httpClient.newCall(request).execute()
+            if (!response.isSuccessful) {
+                emit("大模型请求失败，错误代码: ${response.code}")
+                return@flow
+            }
+
+            val body = response.body
+            if (body == null) {
+                emit("收到空回复")
+                return@flow
+            }
+
+            body.source().use { source ->
+                while (!source.exhausted()) {
+                    val line = source.readUtf8Line() ?: break
+                    if (line.startsWith("data:")) {
+                        val data = line.substring(5).trim()
+                        if (data == "[DONE]") {
+                            break
+                        }
+                        if (data.isNotEmpty()) {
+                            try {
+                                val json = JSONObject(data)
+                                val choices = json.optJSONArray("choices")
+                                if (choices != null && choices.length() > 0) {
+                                    val delta = choices.getJSONObject(0).optJSONObject("delta")
+                                    if (delta != null && delta.has("content")) {
+                                        val chunk = delta.getString("content")
+                                        emit(chunk)
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                // Ignored
+                            }
+                        }
+                    }
+                }
+            }
+            response.close()
+        } catch (e: Exception) {
+            emit("\n[大模型连接出错: ${e.message}]")
+        }
+    }.flowOn(Dispatchers.IO)
 
     /**
      * 测试大模型连接
