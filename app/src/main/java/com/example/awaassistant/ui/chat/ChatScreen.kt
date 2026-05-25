@@ -463,10 +463,10 @@ fun OnboardingView(
 
         // Grid cells for quick suggestions
         val suggestions = listOf(
-            Pair("🔍 查找上张截图", "帮我查一下最后一张截图里的关键信息"),
-            Pair("🌐 翻译屏幕英文", "翻译我最新保存的截图里的英文内容"),
-            Pair("📝 总结工作便签", "总结我昨晚拍的工作手记内容"),
-            Pair("💡 解释代码逻辑", "解释一下最后一张截图里的代码是做什么的")
+            Pair("🔍 查找截图回忆", "帮我搜一下我刚才截图里的关键信息是什么？"),
+            Pair("📝 总结工作便签", "总结我昨晚拍下的工作手记/会议备忘内容"),
+            Pair("🥗 分析食物卡路里", "帮我看看我最近一次吃的食物有多少卡路里"),
+            Pair("🍳 智能食材配菜谱", "根据我最新拍的食材照片，推荐几道健康菜谱")
         )
 
         LazyVerticalGrid(
@@ -483,6 +483,7 @@ fun OnboardingView(
                     border = BorderStroke(1.dp, Color(0x10FFFFFF)),
                     modifier = Modifier
                         .fillMaxWidth()
+                        .height(82.dp) // Fixed height to align all items perfectly!
                         .clickable { onSelectPreset(pair.second) }
                 ) {
                     Column(
