@@ -232,23 +232,26 @@ private fun GlassRecordContent(
                     )
                 }
 
-                // 圆形勾选圈/已完成状态
-                if (isCompleted) {
-                    Icon(
-                        Icons.Default.CheckCircle,
-                        contentDescription = "已完成",
-                        tint = Color(0xFF00E676),
-                        modifier = Modifier
-                            .size(18.dp)
-                            .clickable { onToggleComplete() }
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .size(18.dp)
-                            .border(1.2.dp, Color.Gray.copy(alpha = 0.6f), RoundedCornerShape(9.dp))
-                            .clickable { onToggleComplete() }
-                    )
+                // 圆形勾选圈/已完成状态（仅便签/拍照/截屏等类型需要完成，卡路里和食谱等记录不需要）
+                val showCheckbox = record.sourceType != "CALORIE" && record.sourceType != "RECIPE"
+                if (showCheckbox) {
+                    if (isCompleted) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = "已完成",
+                            tint = Color(0xFF00E676),
+                            modifier = Modifier
+                                .size(18.dp)
+                                .clickable { onToggleComplete() }
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(18.dp)
+                                .border(1.2.dp, Color.Gray.copy(alpha = 0.6f), RoundedCornerShape(9.dp))
+                                .clickable { onToggleComplete() }
+                        )
+                    }
                 }
             }
 
