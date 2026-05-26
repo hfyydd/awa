@@ -172,14 +172,6 @@ fun DashboardScreen(
                                 cursorColor = Color(0xFF8E2DE2)
                             )
                         )
-
-                        Text(
-                            text = if (searchQuery.isEmpty()) "全部记录" else "搜索结果",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            modifier = Modifier.padding(start = 4.dp, end = 4.dp, top = 4.dp)
-                        )
                     }
                 }
 
