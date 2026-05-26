@@ -13,6 +13,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,6 +41,7 @@ fun DashboardScreen(
     viewModel: DashboardViewModel = viewModel(factory = DashboardViewModel.Factory(LocalContext.current))
 ) {
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
     val records by viewModel.captureRecords.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
 
@@ -65,6 +68,7 @@ fun DashboardScreen(
     }
 
     Scaffold(
+        contentWindowInsets = if (showTopBar) ScaffoldDefaults.contentWindowInsets else WindowInsets(0, 0, 0, 0),
         topBar = {
             if (showTopBar) {
                 TopAppBar(
@@ -110,6 +114,10 @@ fun DashboardScreen(
                         colors = listOf(Color(0xFF0F0C1B), Color(0xFF1E1430), Color(0xFF0D061A))
                     )
                 )
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() }
+                ) { focusManager.clearFocus() }
         ) {
             LazyVerticalStaggeredGrid(
                 columns = StaggeredGridCells.Fixed(2),
@@ -118,12 +126,12 @@ fun DashboardScreen(
                     .padding(horizontal = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalItemSpacing = 10.dp,
-                contentPadding = PaddingValues(top = 8.dp, bottom = 80.dp)
+                contentPadding = PaddingValues(top = 4.dp, bottom = 80.dp)
             ) {
                 item(span = StaggeredGridItemSpan.FullLine) {
                     Column(
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.padding(bottom = 8.dp, top = 4.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(bottom = 4.dp)
                     ) {
                         OutlinedTextField(
                             value = searchQuery,
@@ -175,18 +183,64 @@ fun DashboardScreen(
                     }
                 }
 
-                if (records.isEmpty()) {
+                val pendingRecords = records.filter { !it.isCompleted }
+                val completedRecords = records.filter { it.isCompleted }
+
+                if (pendingRecords.isEmpty() && completedRecords.isEmpty()) {
                     item(span = StaggeredGridItemSpan.FullLine) {
                         EmptyStateCard()
                     }
                 } else {
-                    items(records, key = { it.id }) { record ->
+                    // 进行中的记录
+                    items(pendingRecords, key = { it.id }) { record ->
                         StreamRecordCard(
                             record = record,
                             onClick = { onNavigateToDetail(record.id) },
                             onDelete = { viewModel.deleteRecord(context, record) },
                             onToggleComplete = { viewModel.toggleRecordCompletion(context, record) }
                         )
+                    }
+
+                    // 已办结分隔栏
+                    if (completedRecords.isNotEmpty()) {
+                        item(span = StaggeredGridItemSpan.FullLine) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(0.5.dp)
+                                        .background(Color.Gray.copy(alpha = 0.3f))
+                                )
+                                Text(
+                                    text = "已办结 (${completedRecords.size})",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color.Gray.copy(alpha = 0.6f)
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(0.5.dp)
+                                        .background(Color.Gray.copy(alpha = 0.3f))
+                                )
+                            }
+                        }
+
+                        // 已完成的记录
+                        items(completedRecords, key = { it.id }) { record ->
+                            StreamRecordCard(
+                                record = record,
+                                onClick = { onNavigateToDetail(record.id) },
+                                onDelete = { viewModel.deleteRecord(context, record) },
+                                onToggleComplete = { viewModel.toggleRecordCompletion(context, record) }
+                            )
+                        }
                     }
                 }
             }

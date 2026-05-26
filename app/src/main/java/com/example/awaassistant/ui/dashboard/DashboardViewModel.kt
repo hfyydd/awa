@@ -40,7 +40,31 @@ class DashboardViewModel(context: Context) : ViewModel() {
         _searchQuery.value = query
     }
 
-    // 屏幕捕获历史记录 Flow（集成实时搜索过滤逻辑）
+    private fun getDateSearchStrings(timestamp: Long): List<String> {
+        val date = Date(timestamp)
+        val locales = listOf(Locale.getDefault(), Locale.CHINA, Locale.US)
+        val formats = listOf(
+            "yyyy-MM-dd",
+            "yyyy/MM/dd",
+            "MM-dd",
+            "M-d",
+            "yyyy年MM月dd日",
+            "yyyy年M月d日",
+            "MM月dd日",
+            "M月d日"
+        )
+        return formats.flatMap { format ->
+            locales.map { locale ->
+                try {
+                    SimpleDateFormat(format, locale).format(date)
+                } catch (e: Exception) {
+                    ""
+                }
+            }
+        }.filter { it.isNotEmpty() }.distinct()
+    }
+
+    // 屏幕捕获历史记录 Flow（集成实时智能搜索过滤逻辑）
     val captureRecords: StateFlow<List<CaptureRecord>> = combine(
         dao.getAllCapturesFlow(),
         _searchQuery
@@ -48,11 +72,22 @@ class DashboardViewModel(context: Context) : ViewModel() {
         if (query.isBlank()) {
             records
         } else {
-            records.filter { record ->
-                record.title.contains(query, ignoreCase = true) ||
-                record.summary.contains(query, ignoreCase = true) ||
-                record.rawContent.contains(query, ignoreCase = true) ||
-                record.tags.contains(query, ignoreCase = true)
+            // 支持以空格分隔的多关键词匹配 (AND 逻辑)
+            val searchTerms = query.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+            if (searchTerms.isEmpty()) {
+                records
+            } else {
+                records.filter { record ->
+                    val dateStrings = getDateSearchStrings(record.timestamp)
+                    
+                    searchTerms.all { term ->
+                        record.title.contains(term, ignoreCase = true) ||
+                        record.summary.contains(term, ignoreCase = true) ||
+                        record.rawContent.contains(term, ignoreCase = true) ||
+                        record.tags.contains(term, ignoreCase = true) ||
+                        dateStrings.any { dateStr -> dateStr.contains(term, ignoreCase = true) }
+                    }
+                }
             }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())

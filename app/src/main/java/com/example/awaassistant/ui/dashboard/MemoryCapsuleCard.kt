@@ -81,7 +81,11 @@ fun MemoryCapsuleCard(
                             .padding(horizontal = 8.dp, vertical = 3.dp)
                     ) {
                         Text(
-                            text = "${currentCapsule.daysAgo}天",
+                            text = when {
+                                currentCapsule.daysAgo == 0 -> "今天"
+                                currentCapsule.daysAgo == 1 -> "昨天"
+                                else -> "${currentCapsule.daysAgo}天前"
+                            },
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFFC51162)

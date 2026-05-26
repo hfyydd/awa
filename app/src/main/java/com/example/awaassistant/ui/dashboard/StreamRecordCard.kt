@@ -41,6 +41,7 @@ fun StreamRecordCard(
     modifier: Modifier = Modifier
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var showUncompleteDialog by remember { mutableStateOf(false) }
 
     // 删除确认对话框
     if (showDeleteDialog) {
@@ -102,10 +103,68 @@ fun StreamRecordCard(
         )
     }
 
+    // 取消完成确认对话框（防误操作）
+    if (showUncompleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showUncompleteDialog = false },
+            icon = {
+                Icon(
+                    Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    tint = Color(0xFFFFB300),
+                    modifier = Modifier.size(32.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "确认重新标记为未完成？",
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            },
+            text = {
+                Text(
+                    text = "此事项将移回待办列表。",
+                    color = Color.LightGray,
+                    fontSize = 12.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showUncompleteDialog = false
+                        onToggleComplete()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFFFB300)
+                    ),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Text("确认", fontWeight = FontWeight.Bold, color = Color.Black)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUncompleteDialog = false }) {
+                    Text("取消", color = Color.LightGray)
+                }
+            },
+            containerColor = Color(0xFF1A1430),
+            shape = RoundedCornerShape(20.dp)
+        )
+    }
+
     GlassRecordContent(
         record = record,
         onClick = onClick,
-        onToggleComplete = onToggleComplete,
+        onToggleComplete = {
+            if (record.isCompleted) {
+                // 已完成的项要确认才能取消
+                showUncompleteDialog = true
+            } else {
+                // 未完成的项直接勾选完成
+                onToggleComplete()
+            }
+        },
         onDeleteClick = { showDeleteDialog = true },
         modifier = modifier
     )

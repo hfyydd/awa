@@ -105,7 +105,11 @@ class MemoryWidget : AppWidgetProvider() {
 
                 views.setTextViewText(R.id.widget_title, capsule.record.title)
                 views.setTextViewText(R.id.widget_summary, cleanSummary)
-                views.setTextViewText(R.id.widget_days_ago, "${capsule.daysAgo}天前")
+                views.setTextViewText(R.id.widget_days_ago, when {
+                    capsule.daysAgo == 0 -> "今天"
+                    capsule.daysAgo == 1 -> "昨天"
+                    else -> "${capsule.daysAgo}天前"
+                })
                 views.setTextViewText(R.id.widget_date, dateFmt.format(Date(capsule.record.timestamp)))
                 views.setTextViewText(R.id.widget_label, capsule.label)
                 views.setTextViewText(R.id.widget_emoji, capsule.emoji)

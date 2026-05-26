@@ -69,7 +69,21 @@ class TimeCapsuleEngine(private val dao: AppDao) {
     }
 
     private fun daysAgoOf(now: Long, timestamp: Long): Int {
-        return ((now - timestamp) / dayMs).toInt()
+        val calNow = java.util.Calendar.getInstance().apply { timeInMillis = now }
+        val calThen = java.util.Calendar.getInstance().apply { timeInMillis = timestamp }
+        
+        calNow.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        calNow.set(java.util.Calendar.MINUTE, 0)
+        calNow.set(java.util.Calendar.SECOND, 0)
+        calNow.set(java.util.Calendar.MILLISECOND, 0)
+        
+        calThen.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        calThen.set(java.util.Calendar.MINUTE, 0)
+        calThen.set(java.util.Calendar.SECOND, 0)
+        calThen.set(java.util.Calendar.MILLISECOND, 0)
+        
+        val diffMillis = calNow.timeInMillis - calThen.timeInMillis
+        return (diffMillis / (24 * 60 * 60 * 1000L)).toInt().coerceAtLeast(0)
     }
 
     private fun labelOf(daysAgo: Int): String = when {

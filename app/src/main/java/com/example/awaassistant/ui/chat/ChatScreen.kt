@@ -265,6 +265,7 @@ fun ChatScreen(
     )
 
     Scaffold(
+        contentWindowInsets = if (showTopBar) ScaffoldDefaults.contentWindowInsets else WindowInsets(0, 0, 0, 0),
         topBar = {
             if (showTopBar) {
                 TopAppBar(
