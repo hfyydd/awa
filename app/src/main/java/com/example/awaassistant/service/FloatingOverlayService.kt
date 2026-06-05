@@ -598,19 +598,21 @@ class RainbowFlashView(context: Context) : View(context) {
         if (progress < 0.25f) {
             val spotProgress = progress / 0.25f
             val spotRadius = width * 0.45f * spotProgress
-            val spotAlpha = (1f - spotProgress * 0.8f) * 0.95f
-            
-            fillPaint.shader = RadialGradient(
-                cx, cy, spotRadius,
-                intArrayOf(
-                    Color.argb((spotAlpha * 255).toInt(), 255, 255, 255),
-                    Color.argb((spotAlpha * 0.6f * 255).toInt(), 255, 255, 255),
-                    Color.TRANSPARENT
-                ),
-                floatArrayOf(0f, 0.6f, 1f),
-                Shader.TileMode.CLAMP
-            )
-            canvas.drawCircle(cx, cy, spotRadius, fillPaint)
+            if (spotRadius > 0f) {
+                val spotAlpha = (1f - spotProgress * 0.8f) * 0.95f
+                
+                fillPaint.shader = RadialGradient(
+                    cx, cy, spotRadius,
+                    intArrayOf(
+                        Color.argb((spotAlpha * 255).toInt(), 255, 255, 255),
+                        Color.argb((spotAlpha * 0.6f * 255).toInt(), 255, 255, 255),
+                        Color.TRANSPARENT
+                    ),
+                    floatArrayOf(0f, 0.6f, 1f),
+                    Shader.TileMode.CLAMP
+                )
+                canvas.drawCircle(cx, cy, spotRadius, fillPaint)
+            }
         }
 
         // 2. 彩虹环从中心向外扩散（带延迟错开效果）
