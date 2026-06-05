@@ -285,6 +285,9 @@ class AwaAccessibilityService : AccessibilityService() {
         }
         lastTriggerTime = now
 
+        // 开启悬浮球分析动画，提供即时视觉反馈
+        FloatingOverlayService.instance?.setAnalyzingState(true)
+
         // 1. 立即抓取屏幕窗口布局文本（必须在主线程/辅助服务线程立即抓取，防止延迟后窗口树变化）
         val rawLayoutText = captureScreenText()
         val layoutText = ChineseConverter.toSimplified(rawLayoutText)
@@ -326,7 +329,10 @@ class AwaAccessibilityService : AccessibilityService() {
                             // 等待数据库插入任务完成，以获取 recordId
                             recordInsertJob.join()
                             val finalRecordId = recordId
-                            if (finalRecordId == -1L) return@launch
+                            if (finalRecordId == -1L) {
+                                FloatingOverlayService.instance?.setAnalyzingState(false)
+                                return@launch
+                            }
                             
                             if (bitmap != null) {
                                 // 提示用户截图已捕获并开始后台分析
@@ -390,6 +396,7 @@ class AwaAccessibilityService : AccessibilityService() {
                                             } catch (e: Exception) {
                                                 Log.e(TAG, "Failed to update failure state in DB", e)
                                             }
+                                            FloatingOverlayService.instance?.setAnalyzingState(false)
                                             return@launch
                                         }
 
@@ -408,6 +415,8 @@ class AwaAccessibilityService : AccessibilityService() {
                                             }
                                         } catch (dbEx: Throwable) {
                                             Log.e(TAG, "Failed to update error status in DB", dbEx)
+                                        } finally {
+                                            FloatingOverlayService.instance?.setAnalyzingState(false)
                                         }
                                     }
                                 }
@@ -432,6 +441,7 @@ class AwaAccessibilityService : AccessibilityService() {
                                             } catch (e: Exception) {
                                                 Log.e(TAG, "Failed to update failure state in DB", e)
                                             }
+                                            FloatingOverlayService.instance?.setAnalyzingState(false)
                                             return@launch
                                         }
                                         processAndSaveCapturedContentAsync(dao, finalRecordId, layoutText, null, "SCREENSHOT")
@@ -448,12 +458,15 @@ class AwaAccessibilityService : AccessibilityService() {
                                             }
                                         } catch (dbEx: Throwable) {
                                             Log.e(TAG, "Failed to update error status in DB", dbEx)
+                                        } finally {
+                                            FloatingOverlayService.instance?.setAnalyzingState(false)
                                         }
                                     }
                                 }
                             }
                         } catch (e: Throwable) {
                             Log.e(TAG, "Exception in triggerScreenCapture parent coroutine (Android 11+)", e)
+                            FloatingOverlayService.instance?.setAnalyzingState(false)
                         }
                     }
                 }
@@ -467,7 +480,10 @@ class AwaAccessibilityService : AccessibilityService() {
                 try {
                     recordInsertJob.join()
                     val finalRecordId = recordId
-                    if (finalRecordId == -1L) return@launch
+                    if (finalRecordId == -1L) {
+                        FloatingOverlayService.instance?.setAnalyzingState(false)
+                        return@launch
+                    }
 
                     launch(Dispatchers.IO) {
                         try {
@@ -485,6 +501,7 @@ class AwaAccessibilityService : AccessibilityService() {
                                 } catch (e: Exception) {
                                     Log.e(TAG, "Failed to update failure state in DB", e)
                                 }
+                                FloatingOverlayService.instance?.setAnalyzingState(false)
                                 return@launch
                             }
                             processAndSaveCapturedContentAsync(dao, finalRecordId, layoutText, null, "SCREENSHOT")
@@ -501,11 +518,14 @@ class AwaAccessibilityService : AccessibilityService() {
                                 }
                             } catch (dbEx: Throwable) {
                                 Log.e(TAG, "Failed to update error status in DB", dbEx)
+                            } finally {
+                                FloatingOverlayService.instance?.setAnalyzingState(false)
                             }
                         }
                     }
                 } catch (e: Throwable) {
                     Log.e(TAG, "Exception in legacy screen capture parent coroutine", e)
+                    FloatingOverlayService.instance?.setAnalyzingState(false)
                 }
             }
         }
@@ -541,8 +561,23 @@ class AwaAccessibilityService : AccessibilityService() {
     private fun captureScreenImage(callback: (Bitmap?) -> Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             try {
+                var isCallbackInvoked = false
+                val timeoutRunnable = Runnable {
+                    if (!isCallbackInvoked) {
+                        Log.w(TAG, "takeScreenshot timed out (2s), falling back to null")
+                        isCallbackInvoked = true
+                        callback(null)
+                    }
+                }
+                val handler = Handler(Looper.getMainLooper())
+                handler.postDelayed(timeoutRunnable, 2000)
+
                 takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
                     override fun onSuccess(screenshotResult: ScreenshotResult) {
+                        handler.removeCallbacks(timeoutRunnable)
+                        if (isCallbackInvoked) return
+                        isCallbackInvoked = true
+                        
                         val hardwareBuffer = screenshotResult.hardwareBuffer
                         val colorSpace = screenshotResult.colorSpace
                         
@@ -555,6 +590,10 @@ class AwaAccessibilityService : AccessibilityService() {
                     }
 
                     override fun onFailure(errorCode: Int) {
+                        handler.removeCallbacks(timeoutRunnable)
+                        if (isCallbackInvoked) return
+                        isCallbackInvoked = true
+                        
                         Log.e(TAG, "takeScreenshot failed with error code: $errorCode")
                         Handler(Looper.getMainLooper()).post {
                             Toast.makeText(this@AwaAccessibilityService, "屏幕截图失败，错误码: $errorCode", Toast.LENGTH_SHORT).show()
@@ -593,80 +632,84 @@ class AwaAccessibilityService : AccessibilityService() {
         imagePath: String?,
         sourceType: String
     ) {
-        var title = "自动分析记录 (${SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date())})"
-        var summary = "（AI 分析失败，这是原始文本提取）\n\n$rawText"
-        var tags = "分析失败"
-        var result: AnalysisResult? = null
-
         try {
-            result = OpenAiCompatibleClient.analyzeText(this@AwaAccessibilityService, rawText)
-            if (result != null) {
-                title = result.title
-                summary = result.summary
-                tags = result.tags.joinToString(",")
-            }
-        } catch (e: Throwable) {
-            Log.e(TAG, "Error in processAndSaveCapturedContentAsync calling analyzeText", e)
-        }
+            var title = "自动分析记录 (${SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date())})"
+            var summary = "（AI 分析失败，这是原始文本提取）\n\n$rawText"
+            var tags = "分析失败"
+            var result: AnalysisResult? = null
 
-        // 更新 Room 数据库中的现有记录
-        try {
-            val updatedRecord = CaptureRecord(
-                id = recordId,
-                title = title,
-                summary = summary,
-                rawContent = rawText,
-                imagePath = imagePath,
-                timestamp = System.currentTimeMillis(),
-                tags = tags,
-                sourceType = sourceType
-            )
-            dao.updateCapture(updatedRecord)
-        } catch (e: Throwable) {
-            Log.e(TAG, "Failed to update capture record in database", e)
-        }
-
-        // 处理生成的智能提醒
-        if (result != null && result.reminders.isNotEmpty()) {
             try {
-                val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-                for (suggestion in result.reminders) {
-                    try {
-                        val parsedTime = sdf.parse(suggestion.timeString)
-                        if (parsedTime != null && parsedTime.time > System.currentTimeMillis()) {
-                            val reminder = ReminderItem(
-                                recordId = recordId,
-                                title = suggestion.title,
-                                reminderTime = parsedTime.time,
-                                isActive = true,
-                                isTriggered = false
-                            )
-                            val reminderId = dao.insertReminder(reminder)
-                            // 注册到系统的 AlarmManager
-                            ReminderScheduler.scheduleReminder(this@AwaAccessibilityService, reminder.copy(id = reminderId))
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to parse reminder time: ${suggestion.timeString}", e)
-                    }
+                result = OpenAiCompatibleClient.analyzeText(this@AwaAccessibilityService, rawText)
+                if (result != null) {
+                    title = result.title
+                    summary = result.summary
+                    tags = result.tags.joinToString(",")
                 }
             } catch (e: Throwable) {
-                Log.e(TAG, "Error processing reminders in processAndSaveCapturedContentAsync", e)
+                Log.e(TAG, "Error in processAndSaveCapturedContentAsync calling analyzeText", e)
             }
-        }
 
-        try {
-            withContext(Dispatchers.Main) {
-                Toast.makeText(this@AwaAccessibilityService, "屏幕分析整理完成: $title", Toast.LENGTH_SHORT).show()
+            // 更新 Room 数据库中的现有记录
+            try {
+                val updatedRecord = CaptureRecord(
+                    id = recordId,
+                    title = title,
+                    summary = summary,
+                    rawContent = rawText,
+                    imagePath = imagePath,
+                    timestamp = System.currentTimeMillis(),
+                    tags = tags,
+                    sourceType = sourceType
+                )
+                dao.updateCapture(updatedRecord)
+            } catch (e: Throwable) {
+                Log.e(TAG, "Failed to update capture record in database", e)
             }
-        } catch (e: Throwable) {
-            Log.e(TAG, "Failed to show completion toast", e)
-        }
 
-        // 刷新桌面小组件
-        try {
-            WidgetRefreshWorker.triggerNow(this@AwaAccessibilityService)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to trigger widget refresh", e)
+            // 处理生成的智能提醒
+            if (result != null && result.reminders.isNotEmpty()) {
+                try {
+                    val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+                    for (suggestion in result.reminders) {
+                        try {
+                            val parsedTime = sdf.parse(suggestion.timeString)
+                            if (parsedTime != null && parsedTime.time > System.currentTimeMillis()) {
+                                val reminder = ReminderItem(
+                                    recordId = recordId,
+                                    title = suggestion.title,
+                                    reminderTime = parsedTime.time,
+                                    isActive = true,
+                                    isTriggered = false
+                                )
+                                val reminderId = dao.insertReminder(reminder)
+                                // 注册到系统的 AlarmManager
+                                ReminderScheduler.scheduleReminder(this@AwaAccessibilityService, reminder.copy(id = reminderId))
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to parse reminder time: ${suggestion.timeString}", e)
+                        }
+                    }
+                } catch (e: Throwable) {
+                    Log.e(TAG, "Error processing reminders in processAndSaveCapturedContentAsync", e)
+                }
+            }
+
+            try {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@AwaAccessibilityService, "屏幕分析整理完成: $title", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Throwable) {
+                Log.e(TAG, "Failed to show completion toast", e)
+            }
+
+            // 刷新桌面小组件
+            try {
+                WidgetRefreshWorker.triggerNow(this@AwaAccessibilityService)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to trigger widget refresh", e)
+            }
+        } finally {
+            FloatingOverlayService.instance?.setAnalyzingState(false)
         }
     }
 }

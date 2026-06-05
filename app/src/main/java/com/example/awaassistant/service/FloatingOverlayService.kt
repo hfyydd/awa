@@ -50,6 +50,42 @@ class FloatingOverlayService : Service() {
         }
     }
 
+    private var isAnalyzing = false
+    private var pulseAnimator: ValueAnimator? = null
+
+    fun setAnalyzingState(analyzing: Boolean) {
+        handler.post {
+            if (isAnalyzing == analyzing) return@post
+            isAnalyzing = analyzing
+            val container = floatView as? FrameLayout ?: return@post
+            val bubble = container.getChildAt(0) as? ImageView ?: return@post
+            
+            if (analyzing) {
+                // Change stroke/tint to gold/yellow when thinking
+                bubble.setColorFilter(Color.parseColor("#FFD700"))
+                
+                pulseAnimator?.cancel()
+                pulseAnimator = ValueAnimator.ofFloat(1.0f, 1.15f).apply {
+                    duration = 800
+                    repeatMode = ValueAnimator.REVERSE
+                    repeatCount = ValueAnimator.INFINITE
+                    addUpdateListener { anim ->
+                        val value = anim.animatedValue as Float
+                        bubble.scaleX = value
+                        bubble.scaleY = value
+                    }
+                    start()
+                }
+            } else {
+                pulseAnimator?.cancel()
+                pulseAnimator = null
+                bubble.scaleX = 1.0f
+                bubble.scaleY = 1.0f
+                bubble.setColorFilter(Color.WHITE)
+            }
+        }
+    }
+
     companion object {
         private const val TAG = "FloatingOverlayService"
         private const val LONG_PRESS_THRESHOLD = 400L
@@ -138,7 +174,6 @@ class FloatingOverlayService : Service() {
         }
 
         // 手势状态
-        var lastTapTime = 0L
         var isDragging = false
         var isLongPressing = false
 
@@ -182,7 +217,6 @@ class FloatingOverlayService : Service() {
                     }
                     MotionEvent.ACTION_UP -> {
                         handler.removeCallbacks(longPressRunnable)
-                        val now = System.currentTimeMillis()
 
                         when {
                             isDragging -> {
@@ -195,14 +229,9 @@ class FloatingOverlayService : Service() {
                                 // 长按结束 → 停止录音
                                 onLongPressEnded()
                             }
-                            now - lastTapTime < DOUBLE_TAP_THRESHOLD -> {
-                                // 双击 → 截图
-                                onDoubleTapped()
-                                lastTapTime = 0
-                            }
                             else -> {
-                                // 单击 → 静默无操作（已去掉之前的单击截图逻辑）
-                                lastTapTime = now
+                                // 单击 → 立即截图分析！
+                                onSingleTapped()
                             }
                         }
                         return true
@@ -220,13 +249,17 @@ class FloatingOverlayService : Service() {
         windowManager.addView(container, params)
     }
 
-    // ─── 双击 → 截图 + 优化彩虹闪光 ───────────────────────────────────
+    // ─── 悬浮球手势响应逻辑 ───────────────────────────────────
 
-    private fun onDoubleTapped() {
+    private fun onSingleTapped() {
         triggerScreenCapture()
     }
 
     private fun triggerScreenCapture() {
+        if (isAnalyzing) {
+            Toast.makeText(this, "AI 正在分析中，请稍候...", Toast.LENGTH_SHORT).show()
+            return
+        }
         val accessibilityService = AwaAccessibilityService.instance
         if (accessibilityService != null) {
             accessibilityService.triggerScreenCapture()
@@ -479,7 +512,7 @@ class FloatingOverlayService : Service() {
 
     // ─── 优化彩虹闪光效果 ───────────────────────────────────
 
-    /** 全屏彩色闪光（双击截图时触发） */
+    /** 全屏彩色闪光（截图时触发） */
     fun triggerScreenFlash() {
         handler.post {
             val flashView = RainbowFlashView(this)
@@ -504,19 +537,19 @@ class FloatingOverlayService : Service() {
             try {
                 windowManager.addView(flashView, params)
 
-                // 三阶段动画：亮 → 彩虹扩散 → 渐隐
                 flashView.animate()
                     .alpha(1f)
-                    .setDuration(60)
+                    .setDuration(300)
                     .withEndAction {
-                        flashView.animate()
-                            .alpha(0f)
-                            .setDuration(800)
-                            .setInterpolator(AccelerateDecelerateInterpolator())
-                            .withEndAction {
-                                try { windowManager.removeView(flashView) } catch (_: Exception) {}
-                            }
-                            .start()
+                        handler.postDelayed({
+                            flashView.animate()
+                                .alpha(0f)
+                                .setDuration(400)
+                                .withEndAction {
+                                    try { windowManager.removeView(flashView) } catch (_: Exception) {}
+                                }
+                                .start()
+                        }, 500)
                     }
                     .start()
             } catch (e: Exception) {
@@ -544,6 +577,8 @@ class FloatingOverlayService : Service() {
         isRunning = false
         instance = null
         handler.removeCallbacks(recordingDurationUpdater)
+        pulseAnimator?.cancel()
+        pulseAnimator = null
         floatView?.let { try { windowManager.removeView(it) } catch (_: Exception) {} }
         recordingView?.let { try { windowManager.removeView(it) } catch (_: Exception) {} }
         floatView = null
@@ -551,125 +586,78 @@ class FloatingOverlayService : Service() {
     }
 }
 
-/** 优化彩虹闪光视图：中心白光 + 七色光环渐次展开 + 渐隐 */
+/** 全屏彩虹边框闪光视图：屏幕四周旋转的彩虹边框 */
 class RainbowFlashView(context: Context) : View(context) {
 
-    private val screenDiag = hypot(
-        context.resources.displayMetrics.widthPixels.toFloat(),
-        context.resources.displayMetrics.heightPixels.toFloat()
-    )
-    
-    private var progress = 0f
-    
-    // 彩虹七色（更鲜艳）
-    private val rainbowColors = intArrayOf(
-        Color.parseColor("#FF1744"),  // 红
-        Color.parseColor("#FF6D00"),  // 橙
-        Color.parseColor("#FFEA00"),  // 黄
-        Color.parseColor("#00E676"),  // 绿
-        Color.parseColor("#00B0FF"),  // 蓝
-        Color.parseColor("#6200EA"),  // 靛
-        Color.parseColor("#D500F9")   // 紫
-    )
-
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val paintInner = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
+        strokeWidth = dpToPx(6).toFloat()
     }
-
-    private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
+    
+    private val paintOuter = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = dpToPx(16).toFloat()
+        alpha = 76
     }
+    
+    private var shader: SweepGradient? = null
+    private val shaderMatrix = Matrix()
+    private var rotationAngle = 0f
+    private var animator: ValueAnimator? = null
 
-    private val animator = ValueAnimator.ofFloat(0f, 1f).apply {
-        duration = 850
-        addUpdateListener { anim ->
-            progress = anim.animatedValue as Float
-            invalidate()
+    init {
+        animator = ValueAnimator.ofFloat(0f, 360f).apply {
+            duration = 1500
+            repeatCount = ValueAnimator.INFINITE
+            interpolator = android.view.animation.LinearInterpolator()
+            addUpdateListener { animation ->
+                rotationAngle = animation.animatedValue as Float
+                invalidate()
+            }
+            start()
         }
-        start()
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        shader = SweepGradient(
+            w.toFloat() / 2f,
+            h.toFloat() / 2f,
+            intArrayOf(
+                Color.parseColor("#FF007F"),
+                Color.parseColor("#7F00FF"),
+                Color.parseColor("#00F0FF"),
+                Color.parseColor("#00FF66"),
+                Color.parseColor("#FF007F")
+            ),
+            null
+        )
+        paintInner.shader = shader
+        paintOuter.shader = shader
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        val cx = width / 2f
-        val cy = height / 2f
+        val w = width.toFloat()
+        val h = height.toFloat()
+        if (w <= 0 || h <= 0) return
 
-        // 1. 中心白色闪光（瞬间爆发）
-        if (progress < 0.25f) {
-            val spotProgress = progress / 0.25f
-            val spotRadius = width * 0.45f * spotProgress
-            if (spotRadius > 0f) {
-                val spotAlpha = (1f - spotProgress * 0.8f) * 0.95f
-                
-                fillPaint.shader = RadialGradient(
-                    cx, cy, spotRadius,
-                    intArrayOf(
-                        Color.argb((spotAlpha * 255).toInt(), 255, 255, 255),
-                        Color.argb((spotAlpha * 0.6f * 255).toInt(), 255, 255, 255),
-                        Color.TRANSPARENT
-                    ),
-                    floatArrayOf(0f, 0.6f, 1f),
-                    Shader.TileMode.CLAMP
-                )
-                canvas.drawCircle(cx, cy, spotRadius, fillPaint)
-            }
-        }
+        shaderMatrix.setRotate(rotationAngle, w / 2f, h / 2f)
+        shader?.setLocalMatrix(shaderMatrix)
 
-        // 2. 彩虹环从中心向外扩散（带延迟错开效果）
-        if (progress > 0.1f) {
-            val ringProgress = (progress - 0.1f) / 0.9f
-            val maxRadius = screenDiag * 0.75f
-            
-            rainbowColors.forEachIndexed { i, color ->
-                // 每条环有延迟，渐进展开
-                val ringDelay = i * 0.07f
-                val localProgress = ((ringProgress - ringDelay) / (1f - ringDelay * 0.5f)).coerceIn(0f, 1f)
-                
-                if (localProgress > 0) {
-                    val radius = maxRadius * localProgress
-                    val alpha = (1f - localProgress) * 0.9f
-                    
-                    // 主环
-                    paint.color = color
-                    paint.alpha = (alpha * 255).toInt()
-                    paint.strokeWidth = dpToPx(context, 10) * (1f - localProgress * 0.6f)
-                    canvas.drawCircle(cx, cy, radius, paint)
-                    
-                    // 光泽高光（内侧白色细线）
-                    if (i == 0 || i == rainbowColors.lastIndex) {
-                        paint.color = Color.WHITE
-                        paint.alpha = (alpha * 0.5f * 255).toInt()
-                        paint.strokeWidth = dpToPx(context, 2).toFloat()
-                        canvas.drawCircle(cx, cy, radius * 0.98f, paint)
-                    }
-                }
-            }
-        }
+        val outerHalf = paintOuter.strokeWidth / 2f
+        canvas.drawRect(outerHalf, outerHalf, w - outerHalf, h - outerHalf, paintOuter)
 
-        // 3. 最终残留光泽（最外层淡出）
-        if (progress > 0.6f) {
-            val fadeProgress = (progress - 0.6f) / 0.4f
-            val fadeAlpha = (1f - fadeProgress) * 0.25f
-            
-            fillPaint.shader = RadialGradient(
-                cx, cy, screenDiag * 0.5f,
-                intArrayOf(
-                    Color.argb((fadeAlpha * 255).toInt(), 255, 255, 255),
-                    Color.TRANSPARENT
-                ),
-                null,
-                Shader.TileMode.CLAMP
-            )
-            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), fillPaint)
-        }
+        val innerHalf = paintInner.strokeWidth / 2f
+        canvas.drawRect(innerHalf, innerHalf, w - innerHalf, h - innerHalf, paintInner)
     }
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        animator.cancel()
+        animator?.cancel()
     }
 
-    private fun dpToPx(context: Context, dp: Int): Int {
-        return (dp * context.resources.displayMetrics.density).toInt()
+    private fun dpToPx(dp: Int): Int {
+        return (dp * resources.displayMetrics.density).toInt()
     }
 }
